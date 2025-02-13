@@ -1,0 +1,55 @@
+# Environment Configuration
+
+# Physics parameters
+physics:
+  gravity: 9.81  # m/s²
+  
+  # Robot parameters
+  body_mass: 0.06      # kg
+  wheel_mass: 0.04     # kg
+  body_length: 0.025   # m
+  wheel_radius: 0.033  # m
+  body_inertia: 0.001  # kg⋅m²
+  wheel_inertia: 2.0e-5  # kg⋅m²
+  
+  # Motor parameters
+  max_torque: 0.23       # N⋅m
+  motor_deadzone: 0.04   # N⋅m
+  static_friction: 0.7   # coefficient
+  
+  # Simulation parameters
+  timestep: 0.01        # seconds
+  integration_method: "semi-implicit-euler"
+
+# State space
+observation:
+  angle_limit: 1.57079632679  # pi/2 radians (90 degrees)
+  angular_velocity_limit: 8.0  # rad/s
+  position_limit: inf         # meters
+  velocity_limit: 5.0         # m/s
+  wheel_angle_limit: inf      # radians
+  wheel_velocity_limit: 20.0  # rad/s
+
+# Reward parameters
+reward:
+  angle_weight: 2.0
+  angular_velocity_weight: 3.0
+  position_weight: 5.0
+  velocity_weight: 0.5
+  
+  # Exponential decay factors
+  angle_decay: 10.0
+  position_decay: 5.0
+
+# Episode termination
+termination:
+  max_angle: 1.0472  # pi/3 radians (60 degrees)
+  max_position: 0.5  # meters
+  max_steps: 500
+
+# Rendering
+render:
+  mode: "human"  # or "rgb_array"
+  width: 800
+  height: 600
+  fps: 50

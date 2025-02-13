@@ -4,215 +4,257 @@ import numpy as np
 import json
 import time
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Optional, Generator, Tuple
 import pandas as pd
+from pathlib import Path
+import logging
+import yaml
+from tqdm import tqdm
+
+from src.balancing_robot.models import SimNet
+from src.balancing_robot.environment import PhysicsParams
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class LoggedState:
+    """Represents a single logged state from the robot."""
+
+    timestamp: int  # milliseconds since boot
+    dt: float  # control loop period in seconds
+
+    # State variables
+    theta: float  # body angle (rad)
+    theta_dot: float  # angular velocity (rad/s)
+    x: float  # horizontal position (m)
+    x_dot: float  # horizontal velocity (m/s)
+    phi: float  # wheel angle (rad)
+    phi_dot: float  # wheel angular velocity (rad/s)
+
+    # Control outputs
+    model_output: float  # raw model output
+    motor_pwm: int  # applied PWM value
+
+    # System status
+    standing: bool  # whether robot is in standing mode
+    model_active: bool  # whether DDPG model is active
+    battery_voltage: float  # battery voltage
+
+    # Additional metrics
+    acc_x: float  # X acceleration (g)
+    acc_z: float  # Z acceleration (g)
+    gyro_x: float  # X gyro rate (deg/s)
+
 
 @dataclass
 class Episode:
-    states: np.ndarray  # [theta, theta_dot, x, x_dot, phi, phi_dot]
-    actions: np.ndarray  # [motor_pwm]
-    timestamps: np.ndarray
+    """Collection of logged states forming an episode."""
+
+    states: List[LoggedState]
     metadata: Dict
 
+    @property
+    def duration(self) -> float:
+        """Episode duration in seconds."""
+        return sum(state.dt for state in self.states)
+
+    @property
+    def state_array(self) -> np.ndarray:
+        """Convert states to numpy array format for training."""
+        return np.array([[s.theta, s.theta_dot, s.x, s.x_dot, s.phi, s.phi_dot] for s in self.states])
+
+    @property
+    def action_array(self) -> np.ndarray:
+        """Convert actions to numpy array format for training."""
+        return np.array([[s.motor_pwm / 127.0] for s in self.states])
+
+
 class LogProcessor:
-    def __init__(self, port=44444):
+    """Processes telemetry data from the balancing robot."""
+
+    def __init__(self, port: int = 44444, config_path: Optional[str] = None):
+        """Initialize processor with network settings and optional config."""
         # Create UDP socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # Set a timeout (so we can catch Ctrl+C in between packets)
-        self.sock.settimeout(1.0)
-        self.sock.bind(('0.0.0.0', port))
-        
-        # Match your C++ struct (55 bytes, packed):
-        #  1) uint32_t timestamp
-        #  2) float dt
-        #  3) float theta
-        #  4) float theta_dot
-        #  5) float x
-        #  6) float x_dot
-        #  7) float phi
-        #  8) float phi_dot
-        #  9) float model_output
-        # 10) int8_t motor_pwm
-        # 11) bool standing
-        # 12) bool model_active
-        # 13) float battery_voltage
-        # 14) float acc_x
-        # 15) float acc_z
-        # 16) float gyro_x
-        self.format = '<I f f f f f f f f b ?? f f f f'
-        
-        self.current_episode = []
-        self.episodes = []
-        
-        # Variables for tracking packet rate:
-        self.last_print_time = time.time()
+        self.sock.settimeout(1.0)  # Allow interrupt between packets
+        self.sock.bind(("0.0.0.0", port))
+
+        # Data format matching C++ struct
+        self.format = "<I f f f f f f f f b ?? f f f f"
+        self.episodes: List[Episode] = []
+
+        # Load config if provided
+        self.config = None
+        if config_path:
+            with open(config_path, "r") as f:
+                self.config = yaml.safe_load(f)
+
+        # Statistics tracking
         self.packet_count = 0
-        
-    def process_packet(self, data: bytes) -> Dict:
-        """
-        Unpack incoming bytes into a dictionary consistent with our C++ struct.
-        """
+        self.last_print_time = time.time()
+
+    def process_packet(self, data: bytes) -> LoggedState:
+        """Unpack incoming bytes into LoggedState."""
         unpacked = struct.unpack(self.format, data)
-        return {
-            'timestamp':       unpacked[0],
-            'dt':              unpacked[1],
-            'theta':           unpacked[2],
-            'theta_dot':       unpacked[3],
-            'x':               unpacked[4],
-            'x_dot':           unpacked[5],
-            'phi':             unpacked[6],
-            'phi_dot':         unpacked[7],
-            'model_output':    unpacked[8],
-            'motor_pwm':       unpacked[9],
-            'standing':        unpacked[10],
-            'model_active':    unpacked[11],
-            'battery_voltage': unpacked[12],
-            'acc_x':           unpacked[13],
-            'acc_z':           unpacked[14],
-            'gyro_x':          unpacked[15],
-        }
-    
-    def collect_episodes(self, duration_seconds: int = 1500):
-        """
-        Collect episodes for a specified duration or until Ctrl+C is pressed.
-        An 'episode' starts when 'standing' transitions from False to True,
-        and ends when 'standing' becomes False again.
-        """
-        print(f"Collecting data for {duration_seconds} seconds...")
+        return LoggedState(
+            timestamp=unpacked[0],
+            dt=unpacked[1],
+            theta=unpacked[2],
+            theta_dot=unpacked[3],
+            x=unpacked[4],
+            x_dot=unpacked[5],
+            phi=unpacked[6],
+            phi_dot=unpacked[7],
+            model_output=unpacked[8],
+            motor_pwm=unpacked[9],
+            standing=unpacked[10],
+            model_active=unpacked[11],
+            battery_voltage=unpacked[12],
+            acc_x=unpacked[13],
+            acc_z=unpacked[14],
+            gyro_x=unpacked[15],
+        )
+
+    def collect_episodes(
+        self, duration_seconds: int = 1500, min_episode_length: int = 10
+    ) -> Generator[Episode, None, None]:
+        """Collect episodes for specified duration."""
+        logger.info(f"Collecting data for {duration_seconds} seconds...")
         end_time = time.time() + duration_seconds
-        
-        while time.time() < end_time:
-            try:
-                data, addr = self.sock.recvfrom(1024)
-            except socket.timeout:
-                # No data arrived within timeout; check for Ctrl+C again
-                pass
-            except KeyboardInterrupt:
-                # Allow user to stop data collection with Ctrl+C
-                print("\nCtrl+C detected. Stopping data collection...")
-                break
-            else:
-                # If we successfully received data, increment packet_count
+
+        current_episode: List[LoggedState] = []
+
+        try:
+            while time.time() < end_time:
+                try:
+                    data, _ = self.sock.recvfrom(1024)
+                except socket.timeout:
+                    continue
+
                 self.packet_count += 1
-                
-                # If the packet is too short or doesn't match our struct, ignore it
+
                 if len(data) < struct.calcsize(self.format):
                     continue
-                
-                log_entry = self.process_packet(data)
-                
-                # New episode starts when 'standing' transitions from False to True
-                if not self.current_episode and log_entry['standing']:
-                    self.current_episode = []
-                
-                # If we are currently collecting an episode
-                if self.current_episode is not None:
-                    self.current_episode.append(log_entry)
-                    
-                    # Episode ends when 'standing' becomes False
-                    if not log_entry['standing']:
-                        # Filter out episodes of length 1
-                        if len(self.current_episode) > 1:
-                            episode = self._create_episode(self.current_episode)
-                            self.episodes.append(episode)
-                            print(f"New episode collected: length={len(episode.states)}, "
-                                    f"max_angle={episode.metadata['max_angle']:.2f}, "
-                                    f"avg_battery_voltage={episode.metadata['battery_voltage']:.2f}, "
-                                    f"model_active={episode.metadata['model_active']}")
-                            print(f"Received episode length is {len(self.current_episode)}")
-                        self.current_episode = None
 
-            # Check if >1 second has passed; if so, print packet rate
-            now = time.time()
-            if now - self.last_print_time >= 1.0:
-                # Compute packets per second over the last interval
-                elapsed = now - self.last_print_time
-                rate = self.packet_count / elapsed
-                print(f"Packet rate: {rate:.1f} packets/sec")
-                
-                # Reset counters
-                self.packet_count = 0
-                self.last_print_time = now
-        
-        print(f"Data collection complete. Collected {len(self.episodes)} episodes.")
-    
-    def _create_episode(self, log_entries: List[Dict]) -> Episode:
-        """
-        Convert a list of log dictionaries into an Episode object for easier post-processing.
-        """
-        df = pd.DataFrame(log_entries)
-        
-        # We'll store these states: [theta, theta_dot, x, x_dot, phi, phi_dot]
-        states = df[['theta', 'theta_dot', 'x', 'x_dot', 'phi', 'phi_dot']].values
-        
-        # We store a single action = [motor_pwm], normalized to [-1, 1]
-        actions = df[['motor_pwm']].values / 127.0
-        timestamps = df['timestamp'].values
-        
-        # Cast .all() to a Python bool to avoid NumPy bool_ JSON errors
-        metadata = {
-            'battery_voltage': df['battery_voltage'].mean(),
-            'duration': len(df),
-            'max_angle': df['theta'].abs().max(),
-            'model_active': bool(df['model_active'].all())
+                state = self.process_packet(data)
+
+                # New episode starts when standing transitions from False to True
+                if not current_episode and state.standing:
+                    current_episode = []
+
+                if current_episode is not None:
+                    current_episode.append(state)
+
+                    # Episode ends when standing becomes False
+                    if not state.standing:
+                        if len(current_episode) > min_episode_length:
+                            episode = Episode(
+                                states=current_episode, metadata=self._compute_episode_metadata(current_episode)
+                            )
+                            self.episodes.append(episode)
+                            yield episode
+
+                        current_episode = None
+
+                # Print packet rate every second
+                now = time.time()
+                if now - self.last_print_time >= 1.0:
+                    rate = self.packet_count / (now - self.last_print_time)
+                    logger.info(f"Packet rate: {rate:.1f} packets/sec")
+                    self.packet_count = 0
+                    self.last_print_time = now
+
+        except KeyboardInterrupt:
+            logger.info("\nData collection stopped by user")
+
+        logger.info(f"Collected {len(self.episodes)} episodes")
+
+    def _compute_episode_metadata(self, states: List[LoggedState]) -> Dict:
+        """Compute metadata for episode."""
+        return {
+            "duration": sum(s.dt for s in states),
+            "length": len(states),
+            "max_angle": max(abs(s.theta) for s in states),
+            "avg_angle": np.mean([abs(s.theta) for s in states]),
+            "battery_voltage": np.mean([s.battery_voltage for s in states]),
+            "model_active": all(s.model_active for s in states),
         }
-        
-        return Episode(states, actions, timestamps, metadata)
-    
+
     def save_episodes(self, filename: str):
-        """
-        Save the collected episodes as JSON for offline analysis.
-        """
+        """Save collected episodes to file."""
         data = {
-            'episodes': [
-                {
-                    'states': episode.states.tolist(),
-                    'actions': episode.actions.tolist(),
-                    'timestamps': episode.timestamps.tolist(),
-                    'metadata': episode.metadata
-                }
+            "episodes": [
+                {"states": [vars(state) for state in episode.states], "metadata": episode.metadata}
                 for episode in self.episodes
             ]
         }
-        with open(filename, 'w') as f:
-            json.dump(data, f)
-        print(f"Saved {len(self.episodes)} episodes to {filename}")
 
-def calculate_rewards(episode: Episode) -> np.ndarray:
-    """
-    Example reward function that penalizes large angles, velocity, and motor usage.
-    Adjust as desired for your RL problem.
-    """
-    states = episode.states
-    actions = episode.actions
-    
-    # For instance:
-    # Reward for staying near zero angle
-    angle_reward = np.exp(-5.0 * np.square(states[:, 0]))  # theta
-    
-    # Small penalty for angular velocity
-    stability_reward = -0.1 * np.square(states[:, 1])      # theta_dot
-    
-    # Reward for staying near x=0
-    position_reward = np.exp(-2.0 * np.square(states[:, 2])) # x
-    
-    # Penalty for large motor commands
-    power_penalty = -0.05 * np.square(actions[:, 0])
-    
-    return angle_reward + stability_reward + position_reward + power_penalty
+        with open(filename, "w") as f:
+            json.dump(data, f, indent=2)
+
+        logger.info(f"Saved {len(self.episodes)} episodes to {filename}")
+
+    def prepare_training_data(self) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+        """Prepare collected data for SimNet training."""
+        states = []
+        actions = []
+        accelerations = []
+
+        for episode in self.episodes:
+            episode_states = episode.state_array[:-1]  # All but last state
+            episode_actions = episode.action_array[:-1]
+
+            # Calculate accelerations from consecutive states
+            state_diff = np.diff(episode.state_array, axis=0)
+            dt = np.array([s.dt for s in episode.states[:-1]])
+            episode_accels = state_diff / dt[:, np.newaxis]
+
+            states.append(episode_states)
+            actions.append(episode_actions)
+            accelerations.append(episode_accels)
+
+        # Combine all episodes
+        states = np.concatenate(states)
+        actions = np.concatenate(actions)
+        accelerations = np.concatenate(accelerations)
+
+        # Split into train/validation
+        split = int(0.9 * len(states))
+        train_data = {"states": states[:split], "actions": actions[:split], "accelerations": accelerations[:split]}
+        val_data = {"states": states[split:], "actions": actions[split:], "accelerations": accelerations[split:]}
+
+        return train_data, val_data
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Process robot telemetry data")
+    parser.add_argument("--port", type=int, default=44444, help="UDP port for receiving data")
+    parser.add_argument("--duration", type=int, default=1500, help="Duration to collect data (seconds)")
+    parser.add_argument("--config", type=str, help="Path to configuration file")
+    parser.add_argument("--output", type=str, default=None, help="Output file for collected data")
+
+    args = parser.parse_args()
+
+    processor = LogProcessor(args.port, args.config)
+
+    try:
+        for episode in processor.collect_episodes(args.duration):
+            logger.info(
+                f"Collected episode: length={episode.metadata['length']}, "
+                f"max_angle={episode.metadata['max_angle']:.2f}, "
+                f"battery={episode.metadata['battery_voltage']:.2f}V"
+            )
+    except KeyboardInterrupt:
+        logger.info("\nData collection interrupted")
+
+    if args.output or processor.episodes:
+        output_file = args.output or f"robot_logs_{time.strftime('%Y%m%d_%H%M%S')}.json"
+        processor.save_episodes(output_file)
+
 
 if __name__ == "__main__":
-    processor = LogProcessor()
-    try:
-        print("Starting data collection. Press Ctrl+C to stop and save...")
-        processor.collect_episodes(duration_seconds=1500)  # 25 minutes
-    except KeyboardInterrupt:
-        print("\nCtrl+C detected. Saving collected episodes...")
-    finally:
-        if processor.episodes:
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            filename = f"robot_logs_{timestamp}.json"
-            processor.save_episodes(filename)
-            print(f"Saved {len(processor.episodes)} episodes to {filename}")
-        else:
-            print("No episodes collected")
+    main()
