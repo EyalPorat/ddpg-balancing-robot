@@ -2,15 +2,15 @@
 
 # Model architecture
 model:
-  hidden_dims: [128, 128]
+  hidden_dims: [128, 128, 128]
   learning_rate: 0.001
-  dropout_rate: 0.1
+  dropout_rate: 0.3
   activation: "relu"
   layer_norm: true
 
 # Training data collection
 data_collection:
-  physics_samples: 100000
+  physics_samples: 200000
   real_samples: 10000
   noise_std: 0.1
   validation_split: 0.1

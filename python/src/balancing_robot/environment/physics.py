@@ -74,16 +74,17 @@ class PhysicsEngine:
             return simnet.get_accelerations(state, torque)
 
         # Otherwise use physics-based calculations
+        theta = state[0]
         p = self.params
-        theta, theta_dot = state[0], state[1]
 
         # Calculate static friction effects
-        normal_force = self.calculate_normal_force()
         max_static_friction = self.calculate_static_friction_threshold()
+        # print(f"Max static friction: {max_static_friction}")
 
         # If no torque, check static friction
         if abs(torque.item()) < p.motor_deadzone:
             required_friction = abs(p.M * p.g * p.l * np.sin(theta))
+            # print(f"Required static friction: {required_friction}")
 
             if required_friction <= max_static_friction:
                 # Static friction keeps system rigid
@@ -103,6 +104,7 @@ class PhysicsEngine:
             x_ddot = (effective_force - p.M * p.l * theta_ddot * np.cos(theta)) / (p.M + 2 * p.m)
             phi_ddot = torque.item() / p.i
 
+        # print(f"theta_ddot: {theta_ddot}, x_ddot: {x_ddot}, phi_ddot: {phi_ddot}")
         return np.array([theta_ddot, x_ddot, phi_ddot])
 
     def integrate_state(self, state: np.ndarray, accelerations: np.ndarray) -> np.ndarray:

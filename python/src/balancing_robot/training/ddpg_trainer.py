@@ -132,6 +132,11 @@ class DDPGTrainer:
 
         # Sample from replay buffer
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
+        print("states shape:", states.shape)
+        print("actions shape:", actions.shape)
+        print("rewards shape:", rewards.shape)
+        print("next_states shape:", next_states.shape)
+        print("dones shape:", dones.shape)
 
         # Convert to tensors
         states = torch.FloatTensor(states).to(self.device)
@@ -139,6 +144,12 @@ class DDPGTrainer:
         rewards = torch.FloatTensor(rewards).to(self.device)
         next_states = torch.FloatTensor(next_states).to(self.device)
         dones = torch.FloatTensor(dones).to(self.device)
+
+        print("states shape:", states.shape)
+        print("actions shape:", actions.shape)
+        print("rewards shape:", rewards.shape)
+        print("next_states shape:", next_states.shape)
+        print("dones shape:", dones.shape)
 
         # Update critic
         with torch.no_grad():
@@ -197,13 +208,13 @@ class DDPGTrainer:
         best_reward = float("-inf")
 
         for episode in range(num_episodes):
-            state = self.env.reset()
+            state, _ = self.env.reset()
             episode_reward = 0
 
             for step in range(max_steps):
                 # Select and perform action
                 action = self.select_action(state)
-                next_state, reward, done, info = self.env.step(action)
+                next_state, reward, done, truncated, info = self.env.step(action)
 
                 # Store transition
                 self.replay_buffer.push(state, action, reward, next_state, done)
@@ -249,15 +260,19 @@ class DDPGTrainer:
         total_reward = 0
 
         for _ in range(num_episodes):
-            state = self.env.reset()
+            state, _ = self.env.reset()
             episode_reward = 0
             done = False
 
             while not done:
                 action = self.select_action(state, training=False)
-                state, reward, done, _ = self.env.step(action)
+                state, reward, done, _, _ = self.env.step(action)
                 episode_reward += reward
 
             total_reward += episode_reward
 
         return total_reward / num_episodes
+
+    def print_model_info(self):
+        print(self.actor)
+        print(self.critic)

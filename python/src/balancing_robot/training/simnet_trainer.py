@@ -3,7 +3,6 @@ import torch
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
-import logging
 from tqdm import tqdm
 
 from ..models import SimNet
@@ -57,9 +56,6 @@ class SimNetTrainer:
             verbose=True,
         )
 
-        # Set up logging
-        self.logger = logging.getLogger(__name__)
-
     def _get_default_config(self) -> Dict:
         """Return default configuration if none provided."""
         return {
@@ -111,13 +107,15 @@ class SimNetTrainer:
 
         states, actions, accels = [], [], []
 
-        state = self.env.reset()
+        state, _ = self.env.reset()
         for _ in tqdm(range(num_samples), desc="Collecting physics data"):
             # Random action with noise
             action = np.random.uniform(-1, 1, size=self.env.action_space.shape)
             action = np.clip(action + np.random.normal(0, noise_std), -1, 1)
 
             # Get accelerations from physics
+            # print("state: ", state)
+            # print("action: ", action)
             accel = self.env.physics.get_acceleration(state, action)
 
             states.append(state.copy())
@@ -125,9 +123,9 @@ class SimNetTrainer:
             accels.append(accel)
 
             # Step environment
-            state, _, done, _ = self.env.step(action)
+            state, _, done, _, _ = self.env.step(action)
             if done:
-                state = self.env.reset()
+                state, _ = self.env.reset()
 
         # Convert to arrays
         data = {"states": np.array(states), "actions": np.array(actions), "accelerations": np.array(accels)}
@@ -287,11 +285,10 @@ class SimNetTrainer:
             else:
                 patience_counter += 1
                 if patience_counter >= early_stopping_patience:
-                    self.logger.info(f"Early stopping at epoch {epoch}")
+                    print(f"Early stopping at epoch {epoch}")
                     break
 
-            # Log progress
-            self.logger.info(
+            print(
                 f"Epoch {epoch+1}/{num_epochs} - "
                 f"Train Loss: {train_metrics['train_loss']:.6f} - "
                 f"Val Loss: {val_metrics['val_loss']:.6f}"
