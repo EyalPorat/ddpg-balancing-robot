@@ -2,6 +2,7 @@ import yaml
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+import torch
 from typing import Tuple, Dict, Any, Optional
 
 from .physics import PhysicsEngine, PhysicsParams
@@ -139,15 +140,16 @@ class BalancerEnv(gym.Env):
         # Scale action to actual torque
         torque = np.clip(action, -1.0, 1.0) * self.max_torque
 
-        # Calculate accelerations (using SimNet if available)
-        accelerations = self.physics.get_acceleration(self.state, torque, self.simnet)
+        # Calculate accelerations with physics engine
+        accelerations = self.physics.get_acceleration(self.state, torque)
 
-        # Update state
-        self.state = (
-            self.physics.integrate_state(self.state, accelerations)
-            if self.simnet is None
-            else self.simnet(self.state, torque)
-        ).flatten()
+        # Update state, with SimNet if available
+        if self.simnet is None:
+            self.state = self.physics.integrate_state(self.state, accelerations).flatten()
+        else:
+            s_tensor = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
+            a_tensor = torch.tensor(torque, dtype=torch.float32).unsqueeze(0)
+            self.state = self.simnet(s_tensor, a_tensor).detach().numpy()[0]
         self.steps += 1
 
         # Calculate rewards

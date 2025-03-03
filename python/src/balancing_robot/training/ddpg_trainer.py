@@ -8,6 +8,7 @@ from pathlib import Path
 from ..models import Actor, Critic, ReplayBuffer
 from ..environment import BalancerEnv
 from .utils import polyak_update, TrainingLogger, save_model, load_model
+from tqdm import tqdm
 
 
 class DDPGTrainer:
@@ -117,7 +118,7 @@ class DDPGTrainer:
         """Select action using current policy."""
         with torch.no_grad():
             state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            action = self.actor(state).cpu().numpy().squeeze()
+            action = self.actor(state).cpu().numpy().flatten()
 
             if training:
                 current_noise = max(self.action_noise * (self.noise_decay**self.training_steps), self.min_noise)
@@ -132,11 +133,6 @@ class DDPGTrainer:
 
         # Sample from replay buffer
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
-        print("states shape:", states.shape)
-        print("actions shape:", actions.shape)
-        print("rewards shape:", rewards.shape)
-        print("next_states shape:", next_states.shape)
-        print("dones shape:", dones.shape)
 
         # Convert to tensors
         states = torch.FloatTensor(states).to(self.device)
@@ -144,12 +140,6 @@ class DDPGTrainer:
         rewards = torch.FloatTensor(rewards).to(self.device)
         next_states = torch.FloatTensor(next_states).to(self.device)
         dones = torch.FloatTensor(dones).to(self.device)
-
-        print("states shape:", states.shape)
-        print("actions shape:", actions.shape)
-        print("rewards shape:", rewards.shape)
-        print("next_states shape:", next_states.shape)
-        print("dones shape:", dones.shape)
 
         # Update critic
         with torch.no_grad():
@@ -207,7 +197,7 @@ class DDPGTrainer:
         logger = TrainingLogger(log_dir) if log_dir else None
         best_reward = float("-inf")
 
-        for episode in range(num_episodes):
+        for episode in tqdm(range(num_episodes), desc="Episodes"):
             state, _ = self.env.reset()
             episode_reward = 0
 
@@ -236,6 +226,7 @@ class DDPGTrainer:
                 eval_reward = self.evaluate()
                 if logger:
                     logger.log({"eval_reward": eval_reward})
+                tqdm.write(f"Episode {episode+1}: Eval reward = {eval_reward:.2f}")
 
                 # Save best model
                 if eval_reward > best_reward and log_dir:

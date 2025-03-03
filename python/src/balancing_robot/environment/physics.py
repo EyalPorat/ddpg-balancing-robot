@@ -58,20 +58,16 @@ class PhysicsEngine:
         """Calculate maximum static friction force."""
         return self.params.static_friction_coeff * self.calculate_normal_force()
 
-    def get_acceleration(self, state: np.ndarray, torque: np.ndarray, simnet=None) -> np.ndarray:
+    def get_acceleration(self, state: np.ndarray, torque: np.ndarray) -> np.ndarray:
         """Calculate system accelerations based on current state and applied torque.
 
         Args:
             state: System state [theta, theta_dot, x, x_dot, phi, phi_dot]
             torque: Applied motor torque
-            simnet: Optional SimNet model for dynamics prediction
 
         Returns:
             Array of [theta_ddot, x_ddot, phi_ddot]
         """
-        # If SimNet is provided and active, use it for predictions
-        if simnet is not None:
-            return simnet.get_accelerations(state, torque)
 
         # Otherwise use physics-based calculations
         theta = state[0]
