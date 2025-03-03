@@ -51,8 +51,9 @@ def plot_predictions_comparison(physics_preds: np.ndarray,
                               simnet_preds: np.ndarray, 
                               save_path: str = None):
     """Compare physics and SimNet predictions."""
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    titles = ['θ̈', 'ẍ', 'φ̈']
+    fig, axes = plt.subplots(2, 3, figsize=(20, 10))
+    axes = axes.flatten()
+    titles = ['theta', 'theta_dot', 'x', 'x_dot', 'phi', 'phi_dot']
     
     for i, (ax, title) in enumerate(zip(axes, titles)):
         ax.scatter(physics_preds[:, i], simnet_preds[:, i], alpha=0.5)

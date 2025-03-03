@@ -2,9 +2,9 @@
 
 # Model architecture
 model:
-  hidden_dims: [128, 128, 128]
+  hidden_dims: [512, 512, 512]
   learning_rate: 0.001
-  dropout_rate: 0.3
+  dropout_rate: 0.4
   activation: "relu"
   layer_norm: true
 

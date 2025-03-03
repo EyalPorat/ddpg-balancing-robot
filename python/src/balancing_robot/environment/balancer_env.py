@@ -143,7 +143,11 @@ class BalancerEnv(gym.Env):
         accelerations = self.physics.get_acceleration(self.state, torque, self.simnet)
 
         # Update state
-        self.state = self.physics.integrate_state(self.state, accelerations)
+        self.state = (
+            self.physics.integrate_state(self.state, accelerations)
+            if self.simnet is None
+            else self.simnet(self.state, torque)
+        ).flatten()
         self.steps += 1
 
         # Calculate rewards

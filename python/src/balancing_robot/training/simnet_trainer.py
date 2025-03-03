@@ -105,7 +105,7 @@ class SimNetTrainer:
         num_samples = config["physics_samples"]
         noise_std = config["noise_std"]
 
-        states, actions, accels = [], [], []
+        states, actions = [], []
 
         state, _ = self.env.reset()
         for _ in tqdm(range(num_samples), desc="Collecting physics data"):
@@ -113,14 +113,8 @@ class SimNetTrainer:
             action = np.random.uniform(-1, 1, size=self.env.action_space.shape)
             action = np.clip(action + np.random.normal(0, noise_std), -1, 1)
 
-            # Get accelerations from physics
-            # print("state: ", state)
-            # print("action: ", action)
-            accel = self.env.physics.get_acceleration(state, action)
-
             states.append(state.copy())
             actions.append(action)
-            accels.append(accel)
 
             # Step environment
             state, _, done, _, _ = self.env.step(action)
@@ -128,7 +122,7 @@ class SimNetTrainer:
                 state, _ = self.env.reset()
 
         # Convert to arrays
-        data = {"states": np.array(states), "actions": np.array(actions), "accelerations": np.array(accels)}
+        data = {"states": np.array(states), "actions": np.array(actions)}
 
         # Split train/val
         num_samples = len(states)
@@ -152,7 +146,7 @@ class SimNetTrainer:
         Returns:
             Tuple of (train_data, val_data) dictionaries
         """
-        states, actions, accels = [], [], []
+        states, actions = [], []
 
         for entry in log_data:
             # Extract state
@@ -163,21 +157,12 @@ class SimNetTrainer:
             # Extract action and scale to [-1, 1]
             action = np.array([entry["motor_pwm"]]) / 127.0
 
-            # Calculate accelerations from consecutive states
             if len(states) > 0:
-                dt = entry["dt"]
-                prev_state = states[-1]
-
-                theta_ddot = (state[1] - prev_state[1]) / dt  # theta_dot difference
-                x_ddot = (state[3] - prev_state[3]) / dt  # x_dot difference
-                phi_ddot = (state[5] - prev_state[5]) / dt  # phi_dot difference
-
-                accels.append([theta_ddot, x_ddot, phi_ddot])
-                states.append(prev_state)
+                states.append(state)
                 actions.append(action)
 
         # Convert to arrays
-        data = {"states": np.array(states), "actions": np.array(actions), "accelerations": np.array(accels)}
+        data = {"states": np.array(states), "actions": np.array(actions)}
 
         # Split into train/val
         num_samples = len(states)
@@ -204,11 +189,13 @@ class SimNetTrainer:
             idx = slice(i * batch_size, (i + 1) * batch_size)
             states = torch.FloatTensor(train_data["states"][idx]).to(self.device)
             actions = torch.FloatTensor(train_data["actions"][idx]).to(self.device)
-            target_accels = torch.FloatTensor(train_data["accelerations"][idx]).to(self.device)
+            target_states = states[1:]
 
             # Forward pass
-            pred_accels = self.simnet(states, actions)
-            loss = torch.nn.functional.mse_loss(pred_accels, target_accels)
+            pred_states = self.simnet(states[:-1], actions[:-1])
+            loss = torch.nn.functional.mse_loss(pred_states, target_states)
+            # print("next_state", target_states[0])
+            # print("pred_state", pred_states[0]
 
             # Backward pass
             self.optimizer.zero_grad()
@@ -230,10 +217,10 @@ class SimNetTrainer:
                 idx = slice(i * batch_size, (i + 1) * batch_size)
                 states = torch.FloatTensor(val_data["states"][idx]).to(self.device)
                 actions = torch.FloatTensor(val_data["actions"][idx]).to(self.device)
-                target_accels = torch.FloatTensor(val_data["accelerations"][idx]).to(self.device)
+                target_states = states[1:]
 
-                pred_accels = self.simnet(states, actions)
-                loss = torch.nn.functional.mse_loss(pred_accels, target_accels)
+                pred_states = self.simnet(states[:-1], actions[:-1])
+                loss = torch.nn.functional.mse_loss(pred_states, target_states)
                 total_loss += loss.item()
 
         return {"val_loss": total_loss / num_batches}
