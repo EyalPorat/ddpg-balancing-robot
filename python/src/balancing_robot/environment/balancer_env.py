@@ -41,6 +41,7 @@ class BalancerEnv(gym.Env):
         self.simnet = simnet
         self.max_steps = self.config["termination"]["max_steps"] if self.config else 500
         self.render_mode = render_mode
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Define action space (motor torque)
         # Maximum torque in N⋅m
@@ -147,9 +148,10 @@ class BalancerEnv(gym.Env):
         if self.simnet is None:
             self.state = self.physics.integrate_state(self.state, accelerations).flatten()
         else:
-            s_tensor = torch.tensor(self.state, dtype=torch.float32).unsqueeze(0)
-            a_tensor = torch.tensor(torque, dtype=torch.float32).unsqueeze(0)
-            self.state = self.simnet(s_tensor, a_tensor).detach().numpy()[0]
+            s_tensor = torch.tensor(self.state, dtype=torch.float32, device=self.device).unsqueeze(0)
+            a_tensor = torch.tensor(torque, dtype=torch.float32, device=self.device).unsqueeze(0)
+            self.state = self.simnet(s_tensor, a_tensor).cpu().detach().numpy()[0]  # Not sure about this line
+            # self.state = self.simnet(s_tensor, a_tensor).detach().numpy()[0]
         self.steps += 1
 
         # Calculate rewards
