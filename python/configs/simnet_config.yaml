@@ -4,26 +4,26 @@
 model:
   hidden_dims: [512, 512, 512]
   learning_rate: 0.001
-  dropout_rate: 0.4
+  dropout_rate: 0.2
   activation: "relu"
   layer_norm: true
 
 # Training data collection
 data_collection:
-  physics_samples: 200000
+  physics_samples: 1000000
   real_samples: 10000
   noise_std: 0.1
-  validation_split: 0.1
+  validation_split: 0.2
   random_seed: 42
 
 # Training parameters
 training:
   # Physics-based pretraining
   pretrain:
-    epochs: 50
+    epochs: 10
     batch_size: 512
     early_stopping_patience: 10
-    reduce_lr_patience: 5
+    reduce_lr_patience: 4
     reduce_lr_factor: 0.5
     min_lr: 0.00001
 

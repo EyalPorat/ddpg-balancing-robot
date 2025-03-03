@@ -100,42 +100,92 @@ class SimNetTrainer:
         }
 
     def collect_physics_data(self) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
-        """Collect data from physics-based simulation."""
+        """
+        Collect data by:
+        1. Resetting the environment to its initial state
+        2. Taking no action for a period (letting the system fall on its own)
+        3. Taking random actions (with noise) for the rest of each episode
+        4. Not breaking on 'done' so we gather the full episode
+        """
         config = self.config["data_collection"]
         num_samples = config["physics_samples"]
         noise_std = config["noise_std"]
 
-        states, actions = [], []
+        # Arrays to store transitions
+        states, actions, next_states = [], [], []
 
-        state, _ = self.env.reset()
-        for _ in tqdm(range(num_samples), desc="Collecting physics data"):
-            # Random action with noise
-            action = np.random.uniform(-1, 1, size=self.env.action_space.shape)
-            action = np.clip(action + np.random.normal(0, noise_std), -1, 1)
+        # Decide how many steps to record per episode
+        steps_per_episode = 500
+        # Decide how many of those steps are "no action"
+        steps_no_action = steps_per_episode
+        steps_random_action = steps_per_episode - steps_no_action
 
-            states.append(state.copy())
-            actions.append(action)
+        # Compute how many full episodes we want
+        num_episodes = num_samples // steps_per_episode
 
-            # Step environment
-            state, _, done, _, _ = self.env.step(action)
-            if done:
-                state, _ = self.env.reset()
+        for _ in tqdm(range(num_episodes), desc="Collecting physics data"):
+            # Reset environment
+            state, _ = self.env.reset()
 
-        # Convert to arrays
-        data = {"states": np.array(states), "actions": np.array(actions)}
+            # (1) "No action" period
+            for _ in range(steps_no_action):
+                s_t = state.copy()
 
-        # Split train/val
-        num_samples = len(states)
-        num_val = int(num_samples * config["validation_split"])
-        indices = np.random.permutation(num_samples)
+                # Zero action for all motors, letting it fall
+                a_t = np.zeros_like(self.env.action_space.shape, dtype=np.float32)
+                # if action_space.shape is something like (2,), you'd do something like:
+                # a_t = np.zeros(self.env.action_space.shape, dtype=np.float32)
 
+                next_state, _, done, _, _ = self.env.step(a_t)
+
+                states.append(s_t)
+                actions.append(a_t)
+                next_states.append(next_state.copy())
+
+                # Keep going even if done == True (we are ignoring terminal conditions)
+                state = next_state
+
+            # (2) Random actions period
+            for _ in range(steps_random_action):
+                s_t = state.copy()
+
+                # Sample random action with noise
+                a_t = np.random.uniform(-1, 1, size=self.env.action_space.shape)
+                a_t = np.clip(a_t + np.random.normal(0, noise_std), -1, 1)
+
+                next_state, _, done, _, _ = self.env.step(a_t)
+
+                states.append(s_t)
+                actions.append(a_t)
+                next_states.append(next_state.copy())
+
+                # Again, do not break on done
+                state = next_state
+
+        # Convert to numpy arrays
+        states = np.array(states)
+        actions = np.array(actions)
+        next_states = np.array(next_states)
+
+        # Randomly split train & val
+        num_val = int(len(states) * config["validation_split"])
+        indices = np.random.permutation(len(states))
         val_indices = indices[:num_val]
         train_indices = indices[num_val:]
 
-        train_data = {k: v[train_indices] for k, v in data.items()}
-        val_data = {k: v[val_indices] for k, v in data.items()}
+        train_data = {
+            "states": states[train_indices],
+            "actions": actions[train_indices],
+            "next_states": next_states[train_indices],
+        }
+        val_data = {
+            "states": states[val_indices],
+            "actions": actions[val_indices],
+            "next_states": next_states[val_indices],
+        }
 
         return train_data, val_data
+
 
     def process_real_data(self, log_data: List[Dict[str, Any]]) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
         """Process real robot log data for training.
@@ -176,28 +226,30 @@ class SimNetTrainer:
 
         return train_data, val_data
 
-    def train_epoch(
-        self, train_data: Dict[str, np.ndarray], batch_size: int, is_finetuning: bool = False
-    ) -> Dict[str, float]:
-        """Train for one epoch."""
+    def train_epoch(self, train_data: Dict[str, np.ndarray], batch_size: int) -> Dict[str, float]:
         self.simnet.train()
         total_loss = 0
-        num_batches = len(train_data["states"]) // batch_size
+
+        # Pull out arrays for convenience
+        states_arr = train_data["states"]
+        actions_arr = train_data["actions"]
+        next_states_arr = train_data["next_states"]
+
+        num_samples = len(states_arr)
+        num_batches = num_samples // batch_size
 
         for i in range(num_batches):
-            # Get batch
             idx = slice(i * batch_size, (i + 1) * batch_size)
-            states = torch.FloatTensor(train_data["states"][idx]).to(self.device)
-            actions = torch.FloatTensor(train_data["actions"][idx]).to(self.device)
-            target_states = states[1:]
+            states = torch.FloatTensor(states_arr[idx]).to(self.device)
+            actions = torch.FloatTensor(actions_arr[idx]).to(self.device)
+            target_next_states = torch.FloatTensor(next_states_arr[idx]).to(self.device)
 
-            # Forward pass
-            pred_states = self.simnet(states[:-1], actions[:-1])
-            loss = torch.nn.functional.mse_loss(pred_states, target_states)
-            # print("next_state", target_states[0])
-            # print("pred_state", pred_states[0]
+            # Predict next state
+            pred_next_states = self.simnet(states, actions)
 
-            # Backward pass
+            # Compute MSE
+            loss = torch.nn.functional.mse_loss(pred_next_states, target_next_states)
+
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
@@ -207,20 +259,25 @@ class SimNetTrainer:
         return {"train_loss": total_loss / num_batches}
 
     def validate(self, val_data: Dict[str, np.ndarray], batch_size: int) -> Dict[str, float]:
-        """Validate model."""
         self.simnet.eval()
         total_loss = 0
-        num_batches = len(val_data["states"]) // batch_size
+
+        states_arr = val_data["states"]
+        actions_arr = val_data["actions"]
+        next_states_arr = val_data["next_states"]
+
+        num_samples = len(states_arr)
+        num_batches = num_samples // batch_size
 
         with torch.no_grad():
             for i in range(num_batches):
                 idx = slice(i * batch_size, (i + 1) * batch_size)
-                states = torch.FloatTensor(val_data["states"][idx]).to(self.device)
-                actions = torch.FloatTensor(val_data["actions"][idx]).to(self.device)
-                target_states = states[1:]
+                states = torch.FloatTensor(states_arr[idx]).to(self.device)
+                actions = torch.FloatTensor(actions_arr[idx]).to(self.device)
+                target_next_states = torch.FloatTensor(next_states_arr[idx]).to(self.device)
 
-                pred_states = self.simnet(states[:-1], actions[:-1])
-                loss = torch.nn.functional.mse_loss(pred_states, target_states)
+                pred_next_states = self.simnet(states, actions)
+                loss = torch.nn.functional.mse_loss(pred_next_states, target_next_states)
                 total_loss += loss.item()
 
         return {"val_loss": total_loss / num_batches}
@@ -246,7 +303,7 @@ class SimNetTrainer:
 
         for epoch in range(num_epochs):
             # Train
-            train_metrics = self.train_epoch(train_data, batch_size, is_finetuning)
+            train_metrics = self.train_epoch(train_data, batch_size)
 
             # Validate
             val_metrics = self.validate(val_data, batch_size)
