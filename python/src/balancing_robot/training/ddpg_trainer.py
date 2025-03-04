@@ -246,16 +246,18 @@ class DDPGTrainer:
 
         return logger.metrics if logger else {}
 
-    def evaluate(self, num_episodes: int = 5) -> float:
+    def evaluate(self, num_episodes: int = 5, max_steps: int = 500) -> float:
         """Evaluate current policy."""
         total_reward = 0
+        counter = 0
 
         for _ in range(num_episodes):
             state, _ = self.env.reset()
             episode_reward = 0
             done = False
 
-            while not done:
+            while not done and counter < max_steps:
+                counter += 1
                 action = self.select_action(state, training=False)
                 state, reward, done, _, _ = self.env.step(action)
                 episode_reward += reward
