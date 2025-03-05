@@ -226,12 +226,9 @@ class DDPGTrainer:
             if (episode + 1) % eval_freq == 0:
                 eval_reward = self.evaluate()
                 if logger:
-                    logger.log({"eval_reward": eval_reward})
+                    logger.log({"eval_reward": eval_reward, "episode_length": step + 1})
 
-                progress_bar.set_postfix({
-                    'episode': episode + 1,
-                    'eval_reward': f'{eval_reward:.2f}'
-                })
+                progress_bar.set_postfix({"episode": episode + 1, "eval_reward": f"{eval_reward:.2f}"})
 
                 # Save best model
                 if eval_reward > best_reward and log_dir:

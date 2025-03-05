@@ -12,22 +12,45 @@ def plot_training_metrics(metrics: List[Dict], save_path: Path = None):
     
     # Rewards
     ax = axes[0, 0]
-    ax.plot(episodes, [m['episode_reward'] for m in metrics])
+    eval_rewards = []
+    last_reward = 0
+    for m in metrics:
+        reward = m.get('eval_reward', last_reward)
+        eval_rewards.append(reward)
+        last_reward = reward
+    ax.plot(episodes, eval_rewards)
     ax.set_title('Episode Rewards')
     ax.set_xlabel('Episode')
     ax.grid(True)
 
     # Q-values
     ax = axes[0, 1]
-    ax.plot(episodes, [m['q_value'] for m in metrics])
+    q_values = []
+    last_q_value = 0
+    for m in metrics:
+        q_value = m.get('q_value', last_q_value)
+        q_values.append(q_value)
+        last_q_value = q_value
+    ax.plot(episodes, q_values)
     ax.set_title('Average Q-Values')
     ax.set_xlabel('Episode')
     ax.grid(True)
 
     # Losses
     ax = axes[1, 0]
-    ax.plot(episodes, [m['actor_loss'] for m in metrics], label='Actor')
-    ax.plot(episodes, [m['critic_loss'] for m in metrics], label='Critic')
+    actor_losses = []
+    critic_losses = []
+    last_actor_value = 0
+    last_critic_value = 0
+    for m in metrics:
+        actor_loss = m.get('actor_loss', last_actor_value)
+        critic_loss = m.get('critic_loss', last_critic_value)
+        actor_losses.append(actor_loss)
+        critic_losses.append(critic_loss)
+        last_actor_value = actor_loss
+        last_critic_value = critic_loss
+    ax.plot(episodes, actor_losses, label='Actor')
+    ax.plot(episodes, critic_losses, label='Critic')
     ax.set_title('Losses')
     ax.set_xlabel('Episode')
     ax.legend()
@@ -35,7 +58,13 @@ def plot_training_metrics(metrics: List[Dict], save_path: Path = None):
 
     # Episode lengths
     ax = axes[1, 1]
-    ax.plot(episodes, [m['episode_length'] for m in metrics])
+    episodes_lengths = []
+    last_episode_length = 0
+    for m in metrics:
+        episode_length = m.get('episode_length', last_episode_length)
+        episodes_lengths.append(episode_length)
+        last_episode_length = episode_length
+    ax.plot(episodes, episodes_lengths)
     ax.set_title('Episode Length')
     ax.set_xlabel('Episode')
     ax.grid(True)
