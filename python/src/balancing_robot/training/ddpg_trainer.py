@@ -216,6 +216,7 @@ class DDPGTrainer:
                 # Train if enough samples
                 if len(self.replay_buffer) > batch_size:
                     metrics = self.train_step(batch_size)
+                    metrics["episode_reward"] = episode_reward
                     if logger:
                         logger.log(metrics)
 
