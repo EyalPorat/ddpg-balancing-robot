@@ -197,7 +197,9 @@ class DDPGTrainer:
         logger = TrainingLogger(log_dir) if log_dir else None
         best_reward = float("-inf")
 
-        for episode in tqdm(range(num_episodes), desc="Episodes"):
+        progress_bar = tqdm(range(num_episodes), desc="Training", position=0, leave=True)
+
+        for episode in progress_bar:
             state, _ = self.env.reset()
             episode_reward = 0
 
@@ -226,7 +228,11 @@ class DDPGTrainer:
                 eval_reward = self.evaluate()
                 if logger:
                     logger.log({"eval_reward": eval_reward})
-                tqdm.write(f"Episode {episode+1}: Eval reward = {eval_reward:.2f}")
+
+                progress_bar.set_postfix({
+                    'episode': episode + 1,
+                    'eval_reward': f'{eval_reward:.2f}'
+                })
 
                 # Save best model
                 if eval_reward > best_reward and log_dir:

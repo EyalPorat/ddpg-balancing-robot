@@ -16,7 +16,7 @@ training:
   max_steps_per_episode: 500
   batch_size: 512
   gamma: 0.99  # Discount factor
-  tau: 0.005   # Target network update rate
+  tau: 0.001   # Target network update rate
   
   # Experience replay settings
   buffer_size: 1000000
