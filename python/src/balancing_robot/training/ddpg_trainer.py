@@ -145,7 +145,7 @@ class DDPGTrainer:
         with torch.no_grad():
             next_actions = self.actor_target(next_states)
             target_Q = self.critic_target(next_states, next_actions)
-            target_Q = rewards + (1 - dones) * self.gamma * target_Q
+            target_Q = rewards.unsqueeze(1) + (1 - dones.unsqueeze(1)) * self.gamma * target_Q
 
         current_Q = self.critic(states, actions)
         critic_loss = torch.nn.functional.mse_loss(current_Q, target_Q)
