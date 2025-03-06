@@ -2,7 +2,7 @@
 
 # Model architecture
 model:
-  hidden_dims: [16, 16, 16]
+  hidden_dims: [32, 32, 32]
   learning_rate: 0.001
   dropout_rate: 0.2
   activation: "relu"
