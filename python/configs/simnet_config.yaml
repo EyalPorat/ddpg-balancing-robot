@@ -2,7 +2,7 @@
 
 # Model architecture
 model:
-  hidden_dims: [32, 16, 8]
+  hidden_dims: [32, 32, 32]
   learning_rate: 0.001
   dropout_rate: 0.2
   activation: "relu"
@@ -20,7 +20,7 @@ data_collection:
 training:
   # Physics-based pretraining
   pretrain:
-    epochs: 10
+    epochs: 100
     batch_size: 512
     early_stopping_patience: 10
     reduce_lr_patience: 4

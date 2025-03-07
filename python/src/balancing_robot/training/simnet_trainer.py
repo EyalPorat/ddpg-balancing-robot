@@ -119,7 +119,7 @@ class SimNetTrainer:
         # Compute number of episodes for each type
         # We'll have equal numbers of no-action and random-action episodes
         total_episodes = num_samples // steps_per_episode
-        no_action_episodes = total_episodes // 2
+        no_action_episodes = total_episodes // 3
         random_action_episodes = total_episodes - no_action_episodes
 
         # (1) "No action" episodes
@@ -156,7 +156,7 @@ class SimNetTrainer:
                 actions.append(a_t)
                 next_states.append(next_state.copy())
 
-                # Again, do not break on done
+                # do not break on done
                 state = next_state
 
         # Convert to numpy arrays
