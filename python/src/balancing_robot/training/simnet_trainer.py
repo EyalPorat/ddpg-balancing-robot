@@ -103,39 +103,34 @@ class SimNetTrainer:
         """
         Collect data by:
         1. Resetting the environment to its initial state
-        2. Taking no action for a period (letting the system fall on its own)
-        3. Taking random actions (with noise) for the rest of each episode
+        2. Taking no action Episodes (letting the system fall on its own)
+        3. Taking random action episodes (with noise)
         4. Not breaking on 'done' so we gather the full episode
         """
         config = self.config["data_collection"]
         num_samples = config["physics_samples"]
         noise_std = config["noise_std"]
-
         # Arrays to store transitions
         states, actions, next_states = [], [], []
 
         # Decide how many steps to record per episode
         steps_per_episode = 500
-        # Decide how many of those steps are "no action"
-        steps_no_action = steps_per_episode
-        steps_random_action = steps_per_episode - steps_no_action
 
-        # Compute how many full episodes we want
-        num_episodes = num_samples // steps_per_episode
+        # Compute number of episodes for each type
+        # We'll have equal numbers of no-action and random-action episodes
+        total_episodes = num_samples // steps_per_episode
+        no_action_episodes = total_episodes // 2
+        random_action_episodes = total_episodes - no_action_episodes
 
-        for _ in tqdm(range(num_episodes), desc="Collecting physics data"):
+        # (1) "No action" episodes
+        for _ in tqdm(range(no_action_episodes), desc="Collecting no-action physics data"):
             # Reset environment
             state, _ = self.env.reset()
 
-            # (1) "No action" period
-            for _ in range(steps_no_action):
+            for _ in range(steps_per_episode):
                 s_t = state.copy()
-
                 # Zero action for all motors, letting it fall
-                a_t = np.zeros_like(self.env.action_space.shape, dtype=np.float32)
-                # if action_space.shape is something like (2,), you'd do something like:
-                # a_t = np.zeros(self.env.action_space.shape, dtype=np.float32)
-
+                a_t = np.zeros(self.env.action_space.shape, dtype=np.float32)
                 next_state, _, done, _, _ = self.env.step(a_t)
 
                 states.append(s_t)
@@ -145,14 +140,16 @@ class SimNetTrainer:
                 # Keep going even if done == True (we are ignoring terminal conditions)
                 state = next_state
 
-            # (2) Random actions period
-            for _ in range(steps_random_action):
-                s_t = state.copy()
+        # (2) Random actions episodes
+        for _ in tqdm(range(random_action_episodes), desc="Collecting random-action physics data"):
+            # Reset environment
+            state, _ = self.env.reset()
 
+            for _ in range(steps_per_episode):
+                s_t = state.copy()
                 # Sample random action with noise
                 a_t = np.random.uniform(-1, 1, size=self.env.action_space.shape)
-                a_t = np.clip(a_t + np.random.normal(0, noise_std), -1, 1)
-
+                a_t = np.clip(a_t + np.random.normal(0, noise_std, size=self.env.action_space.shape), -1, 1)
                 next_state, _, done, _, _ = self.env.step(a_t)
 
                 states.append(s_t)
@@ -178,6 +175,7 @@ class SimNetTrainer:
             "actions": actions[train_indices],
             "next_states": next_states[train_indices],
         }
+
         val_data = {
             "states": states[val_indices],
             "actions": actions[val_indices],
@@ -185,7 +183,6 @@ class SimNetTrainer:
         }
 
         return train_data, val_data
-
 
     def process_real_data(self, log_data: List[Dict[str, Any]]) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
         """Process real robot log data for training.
