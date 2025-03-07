@@ -45,9 +45,9 @@ def plot_training_metrics(metrics: List[Dict], save_path: Path = None):
         critic_loss = m.get("critic_loss", last_critic_value)
         critic_losses.append(critic_loss)
         last_critic_value = critic_loss
+    ax.plot(episodes, critic_losses)
     ax.set_title("Critic Loss")
     ax.set_xlabel("Episode")
-    ax.legend()
     ax.grid(True)
 
     # Episode lengths
@@ -72,10 +72,10 @@ def plot_training_metrics(metrics: List[Dict], save_path: Path = None):
 
 def plot_state_distributions(states: np.ndarray, save_path: Path = None):
     """Plot distributions of state variables."""
-    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
-    titles = ["Angle", "Angular Velocity", "Position", "Velocity", "Wheel Angle", "Wheel Velocity"]
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    titles = ["Angle", "Angular Velocity"]
 
-    for i, (ax, title) in enumerate(zip(axes.flat, titles)):
+    for i, (ax, title) in enumerate(zip(axes, titles)):
         sns.histplot(states[:, i], ax=ax)
         ax.set_title(title)
 

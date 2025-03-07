@@ -58,106 +58,81 @@ class PhysicsEngine:
         """Calculate maximum static friction force."""
         return self.params.static_friction_coeff * self.calculate_normal_force()
 
-    def get_acceleration(self, state: np.ndarray, torque: np.ndarray) -> np.ndarray:
+    def get_acceleration(self, state: np.ndarray, torque: np.ndarray) -> float:
         """Calculate system accelerations based on current state and applied torque.
 
         Args:
-            state: System state [theta, theta_dot, x, x_dot, phi, phi_dot]
+            state: System state [theta, theta_dot]
             torque: Applied motor torque
 
         Returns:
-            Array of [theta_ddot, x_ddot, phi_ddot]
+            Angular acceleration (theta_ddot)
         """
 
-        # Otherwise use physics-based calculations
+        # Extract state components
         theta = state[0]
         p = self.params
 
         # Calculate static friction effects
         max_static_friction = self.calculate_static_friction_threshold()
-        # print(f"Max static friction: {max_static_friction}")
 
         # If no torque, check static friction
         if abs(torque.item()) < p.motor_deadzone:
             required_friction = abs(p.M * p.g * p.l * np.sin(theta))
-            # print(f"Required static friction: {required_friction}")
 
             if required_friction <= max_static_friction:
                 # Static friction keeps system rigid
                 I_total = p.M * p.l**2 + p.I + 2 * (p.m * p.r**2 + p.i)
                 theta_ddot = (p.M * p.g * p.l * np.sin(theta)) / I_total
-                x_ddot = p.r * theta_ddot
-                phi_ddot = -theta_ddot
             else:
                 # Static friction exceeded
                 theta_ddot = (p.M * p.g * p.l * np.sin(theta)) / (p.M * p.l**2 + p.I)
-                x_ddot = (-p.M * p.l * theta_ddot * np.cos(theta)) / (p.M + 2 * p.m)
-                phi_ddot = 0
         else:
-            # Normal dynamics with applied torque
-            effective_force = torque.item() / p.r
+            # Normal dynamics with applied torque, assuming fixed base (no x movement)
             theta_ddot = (p.M * p.g * p.l * np.sin(theta) - torque.item()) / (p.M * p.l**2 + p.I)
-            x_ddot = (effective_force - p.M * p.l * theta_ddot * np.cos(theta)) / (p.M + 2 * p.m)
-            phi_ddot = torque.item() / p.i
 
-        # print(f"theta_ddot: {theta_ddot}, x_ddot: {x_ddot}, phi_ddot: {phi_ddot}")
-        return np.array([theta_ddot, x_ddot, phi_ddot])
+        return theta_ddot
 
-    def integrate_state(self, state: np.ndarray, accelerations: np.ndarray) -> np.ndarray:
+    def integrate_state(self, state: np.ndarray, theta_ddot: float) -> np.ndarray:
         """Integrate state using semi-implicit Euler method.
 
         Args:
-            state: Current state [theta, theta_dot, x, x_dot, phi, phi_dot]
-            accelerations: Calculated accelerations [theta_ddot, x_ddot, phi_ddot]
+            state: Current state [theta, theta_dot]
+            theta_ddot: Calculated angular acceleration
 
         Returns:
-            Updated state array
+            Updated state array [theta, theta_dot]
         """
         # Extract components
         theta, theta_dot = state[0], state[1]
-        x, x_dot = state[2], state[3]
-        phi, phi_dot = state[4], state[5]
-
-        theta_ddot, x_ddot, phi_ddot = accelerations
 
         # Semi-implicit Euler integration
         dt = self.params.dt
 
-        # Update velocities
+        # Update velocity
         theta_dot_new = theta_dot + theta_ddot * dt
-        x_dot_new = x_dot + x_ddot * dt
-        phi_dot_new = phi_dot + phi_ddot * dt
 
-        # Update positions
+        # Update position
         theta_new = theta + theta_dot_new * dt
-        x_new = x + x_dot_new * dt
-        phi_new = phi + phi_dot_new * dt
 
-        return np.array([theta_new, theta_dot_new, x_new, x_dot_new, phi_new, phi_dot_new])
+        return np.array([theta_new, theta_dot_new])
 
     def get_energy(self, state: np.ndarray) -> float:
         """Calculate total energy of the system.
 
         Args:
-            state: System state [theta, theta_dot, x, x_dot, phi, phi_dot]
+            state: System state [theta, theta_dot]
 
         Returns:
             Total energy in Joules
         """
         p = self.params
         theta, theta_dot = state[0], state[1]
-        x_dot = state[3]
-        phi_dot = state[5]
 
         # Potential energy
         PE = p.M * p.g * p.l * (1 - np.cos(theta))
 
-        # Kinetic energy
-        # Body rotation
+        # Kinetic energy - just body rotation now
         KE_body_rot = 0.5 * p.I * theta_dot**2
-        # Body translation
-        KE_body_trans = 0.5 * p.M * x_dot**2
-        # Wheels
-        KE_wheels = p.m * x_dot**2 + 0.5 * p.i * phi_dot**2
 
-        return PE + KE_body_rot + KE_body_trans + KE_wheels
+        return PE + KE_body_rot

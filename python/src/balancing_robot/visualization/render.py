@@ -8,7 +8,7 @@ def create_episode_animation(states: np.ndarray, actions: np.ndarray, save_path:
     Create an animation of the trained agent balancing.
 
     Args:
-        states: Array of states (theta, theta_dot, x, x_dot, phi, phi_dot)
+        states: Array of states (theta, theta_dot)
         actions: Array of actions (torque)
         save_path: Path to save the animation
         fps: Frames per second
@@ -16,12 +16,6 @@ def create_episode_animation(states: np.ndarray, actions: np.ndarray, save_path:
     Returns:
         Animation object
     """
-    # Determine fixed view limits
-    x_positions = [s[2] for s in states]
-    x_min, x_max = min(x_positions), max(x_positions)
-    view_width = max(x_max - x_min + 0.4, 1.0)  # Add padding
-    x_center = (x_min + x_max) / 2
-
     # Create figure
     fig = plt.figure(figsize=(10, 8))
     ax = plt.gca()
@@ -31,9 +25,11 @@ def create_episode_animation(states: np.ndarray, actions: np.ndarray, save_path:
         state = states[i]
         action = actions[i]
 
+        # Fixed wheel position for visualization
+        wheel_x = 0
+        wheel_y = 0.033  # wheel radius
+
         # Draw robot
-        wheel_x = state[2]
-        wheel_y = 0.033
         body_x = wheel_x + 0.025 * np.sin(state[0])
         body_y = wheel_y + 0.025 * np.cos(state[0])
 
@@ -44,8 +40,11 @@ def create_episode_animation(states: np.ndarray, actions: np.ndarray, save_path:
         ax.add_patch(circle)
         ax.plot([wheel_x, body_x], [wheel_y, body_y], "b-", linewidth=3)
 
-        plt.title(f"θ: {state[0]*180/np.pi:.1f}°, x: {state[2]:.2f}m\Torque: {action.item():.2f}")
-        ax.set_xlim(x_center - view_width / 2, x_center + view_width / 2)
+        # Add angle info and torque
+        plt.title(f"θ: {state[0]*180/np.pi:.1f}°, θ̇: {state[1]:.2f} rad/s\nTorque: {action.item():.2f}")
+
+        # Fixed view
+        ax.set_xlim(-0.5, 0.5)
         ax.set_ylim(-0.1, 0.2)
         ax.grid(True)
         ax.set_aspect("equal")
@@ -62,9 +61,8 @@ def create_episode_animation(states: np.ndarray, actions: np.ndarray, save_path:
 
 def plot_predictions_comparison(physics_preds: np.ndarray, simnet_preds: np.ndarray, save_path: str = None):
     """Compare physics and SimNet predictions."""
-    fig, axes = plt.subplots(2, 3, figsize=(20, 10))
-    axes = axes.flatten()
-    titles = ["theta", "theta_dot", "x", "x_dot", "phi", "phi_dot"]
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    titles = ["theta", "theta_dot"]
 
     for i, (ax, title) in enumerate(zip(axes, titles)):
         ax.scatter(physics_preds[:, i], simnet_preds[:, i], alpha=0.5)

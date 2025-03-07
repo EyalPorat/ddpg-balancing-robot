@@ -51,24 +51,17 @@ class BalancerEnv(gym.Env):
             self.max_torque = 0.23
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
 
-        # Define observation space
-        # [theta, theta_dot, x, x_dot, phi, phi_dot]
+        # Define observation space - [theta, theta_dot]
         if self.config:
             obs_config = self.config["observation"]
             obs_high = np.array(
                 [
                     obs_config["angle_limit"],
                     obs_config["angular_velocity_limit"],
-                    float(obs_config["position_limit"]),
-                    obs_config["velocity_limit"],
-                    float(obs_config["wheel_angle_limit"]),
-                    obs_config["wheel_velocity_limit"],
                 ]
             )
         else:
-            obs_high = np.array(
-                [np.pi / 2, 8.0, np.inf, 5.0, np.inf, 20.0]  # theta  # theta_dot  # x  # x_dot  # phi  # phi_dot
-            )
+            obs_high = np.array([np.pi / 2, 8.0])  # theta  # theta_dot
 
         self.observation_space = spaces.Box(low=-obs_high, high=obs_high, dtype=np.float32)
 
@@ -83,19 +76,13 @@ class BalancerEnv(gym.Env):
             self.reward_weights = {
                 "angle": reward_config["angle_weight"],
                 "angular_velocity": reward_config["angular_velocity_weight"],
-                "position": reward_config["position_weight"],
-                "velocity": reward_config["velocity_weight"],
                 "angle_decay": reward_config["angle_decay"],
-                "position_decay": reward_config["position_decay"],
             }
         else:
             self.reward_weights = {
                 "angle": 2.0,
                 "angular_velocity": 3.0,
-                "position": 5.0,
-                "velocity": 0.5,
                 "angle_decay": 10.0,
-                "position_decay": 5.0,
             }
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
@@ -115,10 +102,6 @@ class BalancerEnv(gym.Env):
             [
                 self.np_random.uniform(-0.3, 0.3),  # theta
                 0.0,  # theta_dot
-                self.np_random.uniform(-0.15, 0.15),  # x
-                0.0,  # x_dot
-                0.0,  # phi
-                0.0,  # phi_dot
             ]
         )
 
@@ -141,17 +124,17 @@ class BalancerEnv(gym.Env):
         # Scale action to actual torque
         torque = np.clip(action, -1.0, 1.0) * self.max_torque
 
-        # Calculate accelerations with physics engine
-        accelerations = self.physics.get_acceleration(self.state, torque)
+        # Calculate angular acceleration with physics engine
+        theta_ddot = self.physics.get_acceleration(self.state, torque)
 
         # Update state, with SimNet if available
         if self.simnet is None:
-            self.state = self.physics.integrate_state(self.state, accelerations).flatten()
+            self.state = self.physics.integrate_state(self.state, theta_ddot)
         else:
             s_tensor = torch.tensor(self.state, dtype=torch.float32, device=self.device).unsqueeze(0)
-            a_tensor = torch.tensor(torque, dtype=torch.float32, device=self.device).unsqueeze(0)
-            self.state = self.simnet(s_tensor, a_tensor).cpu().detach().numpy()[0]  # Not sure about this line
-            # self.state = self.simnet(s_tensor, a_tensor).detach().numpy()[0]
+            a_tensor = torch.tensor(action, dtype=torch.float32, device=self.device).unsqueeze(0)
+            self.state = self.simnet(s_tensor, a_tensor).cpu().detach().numpy()[0]
+
         self.steps += 1
 
         # Calculate rewards
@@ -165,7 +148,6 @@ class BalancerEnv(gym.Env):
         info = {
             "state_of_interest": {
                 "angle": self.state[0],
-                "position": self.state[2],
                 "energy": self.physics.get_energy(self.state),
             }
         }
@@ -181,8 +163,6 @@ class BalancerEnv(gym.Env):
 
         theta = self.state[0]
         theta_dot = self.state[1]
-        x = self.state[2]
-        x_dot = self.state[3]
 
         # Angle reward (exponential decay with angle)
         angle_reward = np.exp(-w["angle_decay"] * theta**2)
@@ -190,31 +170,19 @@ class BalancerEnv(gym.Env):
         # Angular velocity penalty
         angular_vel_penalty = -0.5 * theta_dot**2
 
-        # Position reward (keep robot near origin)
-        position_reward = np.exp(-w["position_decay"] * x**2)
-
-        # Velocity penalty (discourage high speeds)
-        velocity_penalty = -0.1 * x_dot**2
-
         # Combine rewards with weights
-        return (
-            w["angle"] * angle_reward
-            + w["angular_velocity"] * angular_vel_penalty
-            + w["position"] * position_reward
-            + w["velocity"] * velocity_penalty
-        )
+        return w["angle"] * angle_reward + w["angular_velocity"] * angular_vel_penalty
 
     def _check_termination(self) -> bool:
         """Check if episode should terminate."""
         theta = self.state[0]
-        x = self.state[2]
 
-        # Terminate if angle too large or robot too far from origin
+        # Terminate if angle too large
         if self.config:
             term_config = self.config["termination"]
-            return abs(theta) > term_config["max_angle"] or abs(x) > term_config["max_position"]
+            return abs(theta) > term_config["max_angle"]
         else:
-            return abs(theta) > np.pi / 3 or abs(x) > 0.5
+            return abs(theta) > np.pi / 3
 
     def render(self):
         """Render the environment."""
@@ -236,7 +204,6 @@ class BalancerEnv(gym.Env):
 
         # Extract state
         theta = self.state[0]
-        x = self.state[2]
 
         # Robot dimensions
         wheel_radius = self.physics.params.r
@@ -244,6 +211,9 @@ class BalancerEnv(gym.Env):
 
         # Draw ground
         self.ax.axhline(y=0, color="black", linestyle="-", alpha=0.3)
+
+        # Fixed position for visualization (assuming no movement)
+        x = 0
 
         # Draw wheel
         wheel = plt.Circle((x, wheel_radius), wheel_radius, fill=False, color="black")
@@ -260,7 +230,7 @@ class BalancerEnv(gym.Env):
         self.ax.set_aspect("equal")
 
         # Add title with state information
-        self.ax.set_title(f"θ: {theta * 180/np.pi:.1f}°, " f"x: {x:.2f}m\n" f"Steps: {self.steps}")
+        self.ax.set_title(f"θ: {theta * 180/np.pi:.1f}°\n" f"Steps: {self.steps}")
 
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()

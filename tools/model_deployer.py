@@ -31,35 +31,35 @@ class ModelDeployer:
         """Export network weights to binary format for embedded system."""
         with open(filename, "wb") as f:
             # Export layer 1
-            weights = network.l1.weight.data.cpu().numpy()
-            bias = network.l1.bias.data.cpu().numpy()
+            weights = network.network[0].weight.data.cpu().numpy()
+            bias = network.network[0].bias.data.cpu().numpy()
 
             # Write L1 shape
-            f.write(struct.pack("II", 8, 6))  # Fixed shape for the robot
+            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 8x2 for updated state dim
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
             # Write L1 LayerNorm parameters
-            f.write(network.ln1.weight.data.cpu().numpy().astype("float32").tobytes())
-            f.write(network.ln1.bias.data.cpu().numpy().astype("float32").tobytes())
+            f.write(network.network[1].weight.data.cpu().numpy().astype("float32").tobytes())
+            f.write(network.network[1].bias.data.cpu().numpy().astype("float32").tobytes())
 
             # Export layer 2
-            weights = network.l2.weight.data.cpu().numpy()
-            bias = network.l2.bias.data.cpu().numpy()
+            weights = network.network[3].weight.data.cpu().numpy()
+            bias = network.network[3].bias.data.cpu().numpy()
 
             # Write L2 shape
-            f.write(struct.pack("II", 8, 8))
+            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
-            f.write(network.ln2.weight.data.cpu().numpy().astype("float32").tobytes())
-            f.write(network.ln2.bias.data.cpu().numpy().astype("float32").tobytes())
+            f.write(network.network[4].weight.data.cpu().numpy().astype("float32").tobytes())
+            f.write(network.network[4].bias.data.cpu().numpy().astype("float32").tobytes())
 
-            # Export layer 3
-            weights = network.l3.weight.data.cpu().numpy()
-            bias = network.l3.bias.data.cpu().numpy()
+            # Export layer 3 (output layer)
+            weights = network.output_layer.weight.data.cpu().numpy()
+            bias = network.output_layer.bias.data.cpu().numpy()
 
             # Write L3 shape
-            f.write(struct.pack("II", 1, 8))
+            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
@@ -70,8 +70,10 @@ class ModelDeployer:
                 # Verify L1
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L1 shape: {rows}x{cols}")
-                if rows != 8 or cols != 6:
-                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}")
+
+                # We expect 8x2 for the first layer
+                if cols != 2:
+                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected Nx2")
 
                 # Skip weights and biases
                 f.seek(rows * cols * 4 + rows * 4, 1)  # float32 = 4 bytes
@@ -81,8 +83,6 @@ class ModelDeployer:
                 # Verify L2
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L2 shape: {rows}x{cols}")
-                if rows != 8 or cols != 8:
-                    raise ValueError(f"Invalid L2 shape: {rows}x{cols}")
 
                 # Skip L2 data
                 f.seek(rows * cols * 4 + rows * 4, 1)
@@ -91,8 +91,10 @@ class ModelDeployer:
                 # Verify L3
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L3 shape: {rows}x{cols}")
-                if rows != 1 or cols != 8:
-                    raise ValueError(f"Invalid L3 shape: {rows}x{cols}")
+
+                # Output layer should be 1xN (1 action output)
+                if rows != 1:
+                    raise ValueError(f"Invalid L3 shape: {rows}x{cols}, expected 1xN")
 
                 return True
 
@@ -142,7 +144,8 @@ def main():
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
-    actor = Actor(state_dim=6, action_dim=1, max_action=config["physics"]["max_torque"])  # Fixed for our robot
+    # (theta, theta_dot)
+    actor = Actor(state_dim=2, action_dim=1, max_action=config["physics"]["max_torque"])
 
     checkpoint = torch.load(args.model)
     actor.load_state_dict(checkpoint["state_dict"])

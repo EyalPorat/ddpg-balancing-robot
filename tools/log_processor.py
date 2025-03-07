@@ -12,7 +12,6 @@ import yaml
 from tqdm import tqdm
 
 from src.balancing_robot.models import SimNet
-from src.balancing_robot.environment import PhysicsParams
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,10 +27,6 @@ class LoggedState:
     # State variables
     theta: float  # body angle (rad)
     theta_dot: float  # angular velocity (rad/s)
-    x: float  # horizontal position (m)
-    x_dot: float  # horizontal velocity (m/s)
-    phi: float  # wheel angle (rad)
-    phi_dot: float  # wheel angular velocity (rad/s)
 
     # Control outputs
     model_output: float  # raw model output
@@ -63,7 +58,7 @@ class Episode:
     @property
     def state_array(self) -> np.ndarray:
         """Convert states to numpy array format for training."""
-        return np.array([[s.theta, s.theta_dot, s.x, s.x_dot, s.phi, s.phi_dot] for s in self.states])
+        return np.array([[s.theta, s.theta_dot] for s in self.states])
 
     @property
     def action_array(self) -> np.ndarray:
@@ -81,8 +76,8 @@ class LogProcessor:
         self.sock.settimeout(1.0)  # Allow interrupt between packets
         self.sock.bind(("0.0.0.0", port))
 
-        # Data format matching C++ struct
-        self.format = "<I f f f f f f f f b ?? f f f f"
+        # Data format matching C++ struct (updated for simplified state)
+        self.format = "<I f f f f b ?? f f f f"
         self.episodes: List[Episode] = []
 
         # Load config if provided
@@ -103,18 +98,14 @@ class LogProcessor:
             dt=unpacked[1],
             theta=unpacked[2],
             theta_dot=unpacked[3],
-            x=unpacked[4],
-            x_dot=unpacked[5],
-            phi=unpacked[6],
-            phi_dot=unpacked[7],
-            model_output=unpacked[8],
-            motor_pwm=unpacked[9],
-            standing=unpacked[10],
-            model_active=unpacked[11],
-            battery_voltage=unpacked[12],
-            acc_x=unpacked[13],
-            acc_z=unpacked[14],
-            gyro_x=unpacked[15],
+            model_output=unpacked[4],
+            motor_pwm=unpacked[5],
+            standing=unpacked[6],
+            model_active=unpacked[7],
+            battery_voltage=unpacked[8],
+            acc_x=unpacked[9],
+            acc_z=unpacked[10],
+            gyro_x=unpacked[11],
         )
 
     def collect_episodes(
@@ -200,30 +191,26 @@ class LogProcessor:
         """Prepare collected data for SimNet training."""
         states = []
         actions = []
-        accelerations = []
+        next_states = []
 
         for episode in self.episodes:
             episode_states = episode.state_array[:-1]  # All but last state
             episode_actions = episode.action_array[:-1]
-
-            # Calculate accelerations from consecutive states
-            state_diff = np.diff(episode.state_array, axis=0)
-            dt = np.array([s.dt for s in episode.states[:-1]])
-            episode_accels = state_diff / dt[:, np.newaxis]
+            episode_next_states = episode.state_array[1:]  # All but first state
 
             states.append(episode_states)
             actions.append(episode_actions)
-            accelerations.append(episode_accels)
+            next_states.append(episode_next_states)
 
         # Combine all episodes
         states = np.concatenate(states)
         actions = np.concatenate(actions)
-        accelerations = np.concatenate(accelerations)
+        next_states = np.concatenate(next_states)
 
         # Split into train/validation
         split = int(0.9 * len(states))
-        train_data = {"states": states[:split], "actions": actions[:split], "accelerations": accelerations[:split]}
-        val_data = {"states": states[split:], "actions": actions[split:], "accelerations": accelerations[split:]}
+        train_data = {"states": states[:split], "actions": actions[:split], "next_states": next_states[:split]}
+        val_data = {"states": states[split:], "actions": actions[split:], "next_states": next_states[split:]}
 
         return train_data, val_data
 

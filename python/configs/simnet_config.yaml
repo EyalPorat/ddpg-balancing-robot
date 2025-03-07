@@ -10,7 +10,7 @@ model:
 
 # Training data collection
 data_collection:
-  physics_samples: 1000000
+  physics_samples: 500000
   real_samples: 10000
   noise_std: 0.1
   validation_split: 0.2

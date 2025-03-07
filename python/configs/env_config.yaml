@@ -25,26 +25,18 @@ physics:
 observation:
   angle_limit: 1.57079632679  # pi/2 radians (90 degrees)
   angular_velocity_limit: 8.0  # rad/s
-  position_limit: inf         # meters
-  velocity_limit: 5.0         # m/s
-  wheel_angle_limit: inf      # radians
-  wheel_velocity_limit: 20.0  # rad/s
 
 # Reward parameters
 reward:
   angle_weight: 2.0
   angular_velocity_weight: 3.0
-  position_weight: 5.0
-  velocity_weight: 0.5
   
   # Exponential decay factors
   angle_decay: 10.0
-  position_decay: 5.0
 
 # Episode termination
 termination:
   max_angle: 1.0472  # pi/3 radians (60 degrees)
-  max_position: 0.5  # meters
   max_steps: 500
 
 # Rendering
