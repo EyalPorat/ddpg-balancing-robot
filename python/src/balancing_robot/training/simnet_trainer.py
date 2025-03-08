@@ -212,33 +212,56 @@ class SimNetTrainer:
         Returns:
             Tuple of (train_data, val_data) dictionaries
         """
-        states, actions = [], []
+        states = []
+        actions = []
+        next_states = []
 
-        for entry in log_data:
-            # Extract state
-            state = np.array(
-                [entry["theta"], entry["theta_dot"], entry["x"], entry["x_dot"], entry["phi"], entry["phi_dot"]]
-            )
+        # For each episode in the log_data
+        for episode in log_data:
+            episode_states = episode["states"]
 
-            # Extract action and scale to [-1, 1]
-            action = np.array([entry["motor_pwm"]]) / 127.0
+            # Process state transitions within each episode
+            for i in range(len(episode_states) - 1):
+                # Extract current state
+                current = episode_states[i]
+                # Extract next state
+                next_state = episode_states[i + 1]
 
-            if len(states) > 0:
+                # Use only theta and theta_dot as our state
+                state = np.array([current["theta"], current["theta_dot"]])
+                next_state_array = np.array([next_state["theta"], next_state["theta_dot"]])
+
+                # Extract action and scale to [-1, 1]
+                action = np.array([current["motor_pwm"]]) / 127.0
+
                 states.append(state)
                 actions.append(action)
+                next_states.append(next_state_array)
 
         # Convert to arrays
-        data = {"states": np.array(states), "actions": np.array(actions)}
+        states = np.array(states)
+        actions = np.array(actions)
+        next_states = np.array(next_states)
 
-        # Split into train/val
+        # Split into train/validation
+        val_split = self.config["data_collection"]["validation_split"]
         num_samples = len(states)
-        num_val = int(num_samples * self.validation_split)
+        num_val = int(num_samples * val_split)
         indices = np.random.permutation(num_samples)
         val_indices = indices[:num_val]
         train_indices = indices[num_val:]
 
-        train_data = {k: v[train_indices] for k, v in data.items()}
-        val_data = {k: v[val_indices] for k, v in data.items()}
+        train_data = {
+            "states": states[train_indices],
+            "actions": actions[train_indices],
+            "next_states": next_states[train_indices],
+        }
+
+        val_data = {
+            "states": states[val_indices],
+            "actions": actions[val_indices],
+            "next_states": next_states[val_indices],
+        }
 
         return train_data, val_data
 

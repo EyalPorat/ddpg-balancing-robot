@@ -252,8 +252,7 @@ void resetPara() {
     punchDur = 1;
     fbBalance = -3;
     motorDeadband = 10;
-    // maxPwr = 120;
-    maxPwr = 240;
+    maxPwr = 127;
     punchPwr2 = max(punchPwr, motorDeadband);
 }
 
@@ -417,6 +416,7 @@ void loop() {
         standing = false;
         powerL = powerR = 0;
         delay(1000); // Delay to prevent immediate re-calibration
+        estimateAngle();
     }
     
     if (!standing) {
