@@ -170,8 +170,12 @@ class BalancerEnv(gym.Env):
         # Angular velocity penalty
         angular_vel_penalty = -0.5 * theta_dot**2
 
-        # Combine rewards with weights
-        return w["angle"] * angle_reward + w["angular_velocity"] * angular_vel_penalty
+        reward = w["angle"] * angle_reward + w["angular_velocity"] * angular_vel_penalty
+
+        if self._check_termination():
+            reward -= 400
+
+        return reward
 
     def _check_termination(self) -> bool:
         """Check if episode should terminate."""
