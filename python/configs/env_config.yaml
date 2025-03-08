@@ -36,7 +36,7 @@ reward:
 
 # Episode termination
 termination:
-  max_angle: 1.0472  # pi/3 radians (60 degrees)
+  max_angle: 0.785398  # pi/4 radians (45 degrees)
   max_steps: 500
 
 # Rendering
