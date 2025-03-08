@@ -176,7 +176,7 @@ class BalancerEnv(gym.Env):
         reward = w["angle"] * angle_reward + w["angular_velocity"] * angular_vel_penalty
 
         if self._check_termination():
-            reward -= 400
+            reward -= 50
 
         return reward
 
