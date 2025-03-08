@@ -252,7 +252,8 @@ void resetPara() {
     punchDur = 1;
     fbBalance = -3;
     motorDeadband = 10;
-    maxPwr = 120;
+    // maxPwr = 120;
+    maxPwr = 240;
     punchPwr2 = max(punchPwr, motorDeadband);
 }
 

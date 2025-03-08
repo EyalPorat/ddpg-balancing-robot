@@ -1,3 +1,5 @@
+import sys
+import os
 import socket
 import struct
 import torch
@@ -9,7 +11,11 @@ import time
 import logging
 from typing import Dict, Any
 
-from src.balancing_robot.models import Actor
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Now the imports will work
+from python.src.balancing_robot.models import Actor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -147,7 +153,7 @@ def main():
     # (theta, theta_dot)
     actor = Actor(state_dim=2, action_dim=1, max_action=config["physics"]["max_torque"])
 
-    checkpoint = torch.load(args.model)
+    checkpoint = torch.load(args.model, map_location=torch.device('cpu'))
     actor.load_state_dict(checkpoint["state_dict"])
 
     # Export and deploy
