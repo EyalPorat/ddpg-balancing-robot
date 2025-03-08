@@ -1,3 +1,5 @@
+import sys
+import os
 import socket
 import struct
 import numpy as np
@@ -11,7 +13,8 @@ import logging
 import yaml
 from tqdm import tqdm
 
-from src.balancing_robot.models import SimNet
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from python.src.balancing_robot.models import SimNet
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
