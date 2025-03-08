@@ -162,7 +162,7 @@ void estimateAngle() {
     varAngDDPG = lastComplementaryAngleDDPG - initialAngle;
     
     // PID angle calculation
-    varOmg = (gyroYdata - gyroYoffset);
+    varOmg = gyroRate;
     float calibratedAccelerationX = (accXdata - accXoffset);
     varAngPID += (varOmg + (calibratedAccelerationX * 57.3 - varAngPID) * cutoff) * clk;
     
@@ -309,6 +309,9 @@ void accelInitialAngCalibration() {
     }
     
     initialAngle = (-atan2(sumAccX / N_CAL2, sumAccZ / N_CAL2) * RAD_TO_DEG) + 180.0;
+    if (initialAngle > 180.0) {
+        initialAngle -= 360.0;
+    }
     lastComplementaryAngle = lastComplementaryAngleDDPG = initialAngle;
     
     M5.Lcd.fillScreen(BLACK);
@@ -413,6 +416,7 @@ void loop() {
         resetVar();
         standing = false;
         powerL = powerR = 0;
+        delay(1000); // Delay to prevent immediate re-calibration
     }
     
     if (!standing) {
