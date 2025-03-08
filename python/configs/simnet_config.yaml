@@ -12,7 +12,8 @@ model:
 data_collection:
   physics_samples: 500000
   real_samples: 10000
-  noise_std: 0.1
+  noise_std: 0.1              # Action noise
+  observation_noise_std: 0.01  # observation noise
   validation_split: 0.2
   random_seed: 42
 

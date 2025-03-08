@@ -105,11 +105,14 @@ class SimNetTrainer:
         1. Resetting the environment to its initial state
         2. Taking no action Episodes (letting the system fall on its own)
         3. Taking random action episodes (with noise)
-        4. Not breaking on 'done' so we gather the full episode
+        4. Adding observation noise to increase robustness
+        5. Not breaking on 'done' so we gather the full episode
         """
         config = self.config["data_collection"]
         num_samples = config["physics_samples"]
-        noise_std = config["noise_std"]
+        action_noise_std = config["noise_std"]
+        observation_noise_std = config.get("observation_noise_std", 0.01)  # Default observation noise
+
         # Arrays to store transitions
         states, actions, next_states = [], [], []
 
@@ -127,11 +130,17 @@ class SimNetTrainer:
             # Reset environment
             state, _ = self.env.reset()
 
+            # Add initial observation noise
+            state = state + np.random.normal(0, observation_noise_std, size=state.shape)
+
             for _ in range(steps_per_episode):
                 s_t = state.copy()
                 # Zero action for all motors, letting it fall
                 a_t = np.zeros(self.env.action_space.shape, dtype=np.float32)
                 next_state, _, done, _, _ = self.env.step(a_t)
+
+                # Add observation noise to next_state
+                next_state = next_state + np.random.normal(0, observation_noise_std, size=next_state.shape)
 
                 states.append(s_t)
                 actions.append(a_t)
@@ -145,12 +154,22 @@ class SimNetTrainer:
             # Reset environment
             state, _ = self.env.reset()
 
+            # Add initial observation noise
+            state = state + np.random.normal(0, observation_noise_std, size=state.shape)
+
             for _ in range(steps_per_episode):
                 s_t = state.copy()
-                # Sample random action with noise
+
+                # Sample random action
                 a_t = np.random.uniform(-1, 1, size=self.env.action_space.shape)
-                a_t = np.clip(a_t + np.random.normal(0, noise_std, size=self.env.action_space.shape), -1, 1)
+
+                # Add action noise to increase exploration
+                a_t = np.clip(a_t + np.random.normal(0, action_noise_std, size=self.env.action_space.shape), -1, 1)
+
                 next_state, _, done, _, _ = self.env.step(a_t)
+
+                # Add observation noise to next_state
+                next_state = next_state + np.random.normal(0, observation_noise_std, size=next_state.shape)
 
                 states.append(s_t)
                 actions.append(a_t)
