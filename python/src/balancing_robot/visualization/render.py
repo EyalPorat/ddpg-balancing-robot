@@ -59,13 +59,16 @@ def create_episode_animation(states: np.ndarray, actions: np.ndarray, save_path:
     return anim
 
 
-def plot_predictions_comparison(physics_preds: np.ndarray, simnet_preds: np.ndarray, save_path: str = None):
+def plot_predictions_comparison(
+    physics_preds: np.ndarray, simnet_preds: np.ndarray, simnet_physics_preds: np.ndarray, save_path: str = None
+):
     """Compare physics and SimNet predictions."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))
     titles = ["theta", "theta_dot"]
 
     for i, (ax, title) in enumerate(zip(axes, titles)):
-        ax.scatter(physics_preds[:, i], simnet_preds[:, i], alpha=0.5)
+        ax.scatter(physics_preds[:, i], simnet_preds[:, i], alpha=0.5, label="Fine-Tuned SimNet", color="orange")
+        ax.scatter(physics_preds[:, i], simnet_physics_preds[:, i], alpha=0.2, label="SimNet Physics", color="lightblue")
         ax.plot(
             [min(physics_preds[:, i]), max(physics_preds[:, i])],
             [min(physics_preds[:, i]), max(physics_preds[:, i])],
@@ -76,6 +79,7 @@ def plot_predictions_comparison(physics_preds: np.ndarray, simnet_preds: np.ndar
         ax.set_ylabel("SimNet")
         ax.set_title(title)
         ax.grid(True)
+        ax.legend()
 
     plt.tight_layout()
     if save_path:
