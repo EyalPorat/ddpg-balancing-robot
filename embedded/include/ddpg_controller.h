@@ -31,7 +31,8 @@ public:
             // Initialize components one at a time with checks
             Serial.println("Creating actor...");
             if (!actor) {
-                actor = new DDPGActor(6, 8, 1, max_action);
+                // (theta, theta_dot)
+                actor = new DDPGActor(2, 8, 1, max_action);
                 if (!actor) {
                     Serial.println("Failed to create actor");
                     return false;
@@ -49,7 +50,7 @@ public:
 
             Serial.println("Initializing state buffer...");
             try {
-                state_buffer.resize(6);
+                state_buffer.resize(2);
             } catch (const std::exception& e) {
                 Serial.println("Failed to resize state buffer");
                 return false;
@@ -108,15 +109,11 @@ public:
         }
     }
 
-    float getAction(float theta, float theta_dot, float x, float x_dot, float phi, float phi_dot) {
+    float getAction(float theta, float theta_dot) {
         if (!initialized || !actor) return 0.0f;
 
         state_buffer[0] = theta;
         state_buffer[1] = theta_dot;
-        state_buffer[2] = x;
-        state_buffer[3] = x_dot;
-        state_buffer[4] = phi;
-        state_buffer[5] = phi_dot;
 
         return actor->forward(state_buffer);
     }

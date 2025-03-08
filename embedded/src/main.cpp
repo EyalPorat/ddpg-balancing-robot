@@ -79,7 +79,6 @@ float lastComplementaryAngle = 0.0;
 float varAngDDPG = 0.0;
 float varAngPID = 0.0;
 float lastComplementaryAngleDDPG = 0.0;
-float lastComplementaryAnglePID = 0.0;
 
 // IMU variables
 float gyroXoffset = 0.0, gyroYoffset = 0.0, accXoffset = 0.0;
@@ -113,18 +112,6 @@ int16_t punchPwr = 20;
 int16_t punchDur = 1;
 int16_t punchPwr2;
 int16_t punchCountL = 0, punchCountR = 0;
-
-// Physical parameters
-float wheel_radius = 0.033;  // meters
-float wheel_angle = 0.0;     // radians
-float wheel_velocity = 0.0;  // rad/s
-uint32_t last_wheel_update = 0;
-
-// DDPG state variables
-float ddpg_speed = 0.0;
-float ddpg_distance = 0.0;
-float prev_ddpg_distance = 0.0;
-uint32_t last_ddpg_update = 0;
 
 // Global objects
 UdpLogger logger;
@@ -170,7 +157,7 @@ void estimateAngle() {
     }
     
     lastComplementaryAngleDDPG = (1.0 - cutoff) * (lastComplementaryAngleDDPG + gyroRate * clk) + 
-                                 cutoff * accelAngleDDPG;
+                             cutoff * accelAngleDDPG;
     
     varAngDDPG = lastComplementaryAngleDDPG - initialAngle;
     
@@ -223,44 +210,18 @@ void motorPowerWithPunch(int16_t power, int16_t& dir, int16_t& count, void (*dri
     }
 }
 
-void updateDDPGStates() {
-    uint32_t current_time = millis();
-    float dt = (current_time - last_wheel_update) / 1000.0f;
-    
-    if (dt > 0) {
-        float avg_motor_command = outputL;
-        const float MAX_WHEEL_SPEED = 434.0f;  // degrees per second
-        wheel_velocity = (avg_motor_command / 127.0f) * (MAX_WHEEL_SPEED * DEG_TO_RAD);
-        wheel_angle += wheel_velocity * dt;
-        ddpg_speed = wheel_velocity * wheel_radius;
-        ddpg_distance += ddpg_speed * dt;
-        prev_ddpg_distance = ddpg_distance;
-        last_wheel_update = current_time;
-    }
-}
-
 void drive() {
     if (!standing) return;
 
     if (demoMode == MODE_DDPG && ddpgController.isInitialized()) {
-        updateDDPGStates();
-
-        float theta_rad = varAng * DEG_TO_RAD;
-        float theta_dot_rad = varOmg * DEG_TO_RAD;
-        
         float action = ddpgController.getAction(
-            theta_rad,
-            theta_dot_rad,
-            ddpg_distance,
-            ddpg_speed,
-            wheel_angle,
-            wheel_velocity
+            varAngDDPG * DEG_TO_RAD,  // Convert to radians
+            varOmg * DEG_TO_RAD   // Convert to radians
         );
         
         action = constrain(action, -maxPwr, maxPwr);
         driveMotorL(action);
         driveMotorR(action);
-
     } else {
         varSpd += power * clk;
         varDst += Kdst * (varSpd * clk - moveTarget);
@@ -297,14 +258,9 @@ void resetPara() {
 
 void resetVar() {
     power = moveTarget = 0.0;
-    varAngDDPG = varAngPID = varOmg = varDst = varSpd = varIang = 0.0;
-    lastComplementaryAngleDDPG = lastComplementaryAnglePID = initialAngle;
-    
-    ddpg_speed = ddpg_distance = prev_ddpg_distance = 0.0;
-    last_ddpg_update = millis();
-
-    wheel_angle = wheel_velocity = 0.0;
-    last_wheel_update = millis();
+    varAng = varOmg = varDst = varSpd = varIang = 0.0;
+    varAngDDPG = varAngPID = 0.0;
+    lastComplementaryAngle = lastComplementaryAngleDDPG = initialAngle;
 }
 
 void resetMotor() {
@@ -352,7 +308,7 @@ void accelInitialAngCalibration() {
     }
     
     initialAngle = (-atan2(sumAccX / N_CAL2, sumAccZ / N_CAL2) * RAD_TO_DEG) + 180.0;
-    lastComplementaryAngle = initialAngle;
+    lastComplementaryAngle = lastComplementaryAngleDDPG = initialAngle;
     
     M5.Lcd.fillScreen(BLACK);
     digitalWrite(LED, HIGH);
@@ -568,10 +524,6 @@ void buildLogMessage(LogMessage &logMessage) {
     
     logMessage.theta = varAng * DEG_TO_RAD;
     logMessage.theta_dot = varOmg * DEG_TO_RAD;
-    logMessage.x = ddpg_distance;
-    logMessage.x_dot = ddpg_speed;
-    logMessage.phi = wheel_angle;
-    logMessage.phi_dot = wheel_velocity;
     
     logMessage.model_output = power;
     logMessage.motor_pwm = outputL;
