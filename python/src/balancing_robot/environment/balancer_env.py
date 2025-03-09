@@ -98,7 +98,7 @@ class BalancerEnv(gym.Env):
         super().reset(seed=seed)
 
         # Initialize with random angle and angular velocity
-        theta_deg = self.np_random.uniform(-60, 60)  # theta in degrees
+        theta_deg = self.np_random.uniform(-40, 40)  # theta in degrees
         theta_dot_deg = self.np_random.uniform(-240, 240)  # theta_dot in degrees per second
 
         self.state = np.array(

@@ -846,139 +846,6 @@ class ModelAnalyzer:
 
         print("Controller comparison completed and saved.")
 
-    def analyze_model_robustness(self):
-        """Analyze controller robustness to parameter variations."""
-        print("Analyzing controller robustness...")
-
-        # Define parameter variations to test
-        variations = {
-            "mass": [0.5, 0.75, 1.0, 1.25, 1.5],  # Multiplier for body mass
-            "length": [0.75, 0.9, 1.0, 1.1, 1.25],  # Multiplier for body length
-        }
-
-        # Initial conditions to test
-        initial_conditions = [
-            (np.pi / 12, 0.0, "15° angle"),
-            (0.0, 1.0, "1 rad/s velocity"),
-            (np.pi / 12, 1.0, "Combined state"),
-        ]
-
-        # Storage for trajectory data
-        mass_trajectories = []
-        length_trajectories = []
-
-        # Simulate trajectories with mass variations
-        for mass_mult in variations["mass"]:
-            # Create a new physics engine with modified mass
-            params = self.env.physics.params
-            modified_params = type(params)()
-            for attr, value in vars(params).items():
-                setattr(modified_params, attr, value)
-
-            # Modify mass
-            modified_params.M = params.M * mass_mult
-            modified_physics = type(self.env.physics)(modified_params)
-
-            # Simulate trajectories for each initial condition
-            for theta, theta_dot, label in initial_conditions:
-                state = np.array([theta, theta_dot])
-                states = [state.copy()]
-
-                # Simulate
-                for _ in range(100):  # 100 steps (1 second with 0.01s timestep)
-                    action = self.predict_actions([state])[0][0]
-                    accel = modified_physics.get_acceleration(state, action)
-                    next_state = modified_physics.integrate_state(state, accel)
-                    states.append(next_state.copy())
-                    state = next_state
-
-                    # Break if robot has fallen
-                    if abs(state[0]) > np.pi / 2:
-                        break
-
-                # Store trajectory data
-                mass_trajectories.append({"mass_mult": mass_mult, "init_cond": label, "states": np.array(states)})
-
-        # Simulate trajectories with length variations
-        for length_mult in variations["length"]:
-            # Create a new physics engine with modified length
-            params = self.env.physics.params
-            modified_params = type(params)()
-            for attr, value in vars(params).items():
-                setattr(modified_params, attr, value)
-
-            # Modify length
-            modified_params.l = params.l * length_mult
-            modified_physics = type(self.env.physics)(modified_params)
-
-            # Simulate trajectories for each initial condition
-            for theta, theta_dot, label in initial_conditions:
-                state = np.array([theta, theta_dot])
-                states = [state.copy()]
-
-                # Simulate
-                for _ in range(100):  # 100 steps
-                    action = self.predict_actions([state])[0][0]
-                    accel = modified_physics.get_acceleration(state, action)
-                    next_state = modified_physics.integrate_state(state, accel)
-                    states.append(next_state.copy())
-                    state = next_state
-
-                    # Break if robot has fallen
-                    if abs(state[0]) > np.pi / 2:
-                        break
-
-                # Store trajectory data
-                length_trajectories.append({"length_mult": length_mult, "init_cond": label, "states": np.array(states)})
-
-        # Plot mass variation results
-        for init_cond in [traj["init_cond"] for traj in mass_trajectories[:3]]:  # Get unique initial conditions
-            plt.figure(figsize=(12, 8))
-
-            for traj in mass_trajectories:
-                if traj["init_cond"] == init_cond:
-                    plt.plot(
-                        np.arange(len(traj["states"])) * self.env.physics.params.dt,
-                        traj["states"][:, 0] * 180 / np.pi,
-                        label=f"Mass × {traj['mass_mult']}",
-                    )
-
-            plt.grid(True)
-            plt.xlabel("Time (s)")
-            plt.ylabel("Angle θ (degrees)")
-            plt.title(f"Robustness to Mass Variation - Initial: {init_cond}")
-            plt.legend()
-            plt.tight_layout()
-
-            # Create filename from initial condition label
-            filename = f"mass_robustness_{init_cond.replace(' ', '_').replace('°', 'deg')}.png"
-            plt.savefig(self.output_dir / filename)
-
-        # Plot length variation results
-        for init_cond in [traj["init_cond"] for traj in length_trajectories[:3]]:  # Get unique initial conditions
-            plt.figure(figsize=(12, 8))
-
-            for traj in length_trajectories:
-                if traj["init_cond"] == init_cond:
-                    plt.plot(
-                        np.arange(len(traj["states"])) * self.env.physics.params.dt,
-                        traj["states"][:, 0] * 180 / np.pi,
-                        label=f"Length × {traj['length_mult']}",
-                    )
-
-            plt.grid(True)
-            plt.xlabel("Time (s)")
-            plt.ylabel("Angle θ (degrees)")
-            plt.title(f"Robustness to Length Variation - Initial: {init_cond}")
-            plt.legend()
-            plt.tight_layout()
-
-            # Create filename from initial condition label
-            filename = f"length_robustness_{init_cond.replace(' ', '_').replace('°', 'deg')}.png"
-            plt.savefig(self.output_dir / filename)
-
-        print("Robustness analysis completed and saved.")
-
     def run_complete_analysis(self):
         """Run all analysis methods."""
         self.analyze_response_curves()
@@ -991,7 +858,6 @@ class ModelAnalyzer:
         self.analyze_controller_nonlinearity()
         self.analyze_simulated_trajectories()
         self.generate_comparative_pd_controller()
-        self.analyze_model_robustness()
 
         print("\nComplete analysis finished. Results saved to:", self.output_dir)
 
@@ -1151,8 +1017,6 @@ def main():
         analyzer.analyze_simulated_trajectories()
     elif args.analysis == "pd":
         analyzer.generate_comparative_pd_controller()
-    elif args.analysis == "robustness":
-        analyzer.analyze_model_robustness()
 
 
 if __name__ == "__main__":
