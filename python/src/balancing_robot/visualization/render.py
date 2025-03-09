@@ -67,8 +67,8 @@ def plot_predictions_comparison(
     titles = ["theta", "theta_dot"]
 
     for i, (ax, title) in enumerate(zip(axes, titles)):
-        ax.scatter(physics_preds[:, i], simnet_preds[:, i], alpha=0.5, label="Fine-Tuned SimNet", color="orange")
-        ax.scatter(physics_preds[:, i], simnet_physics_preds[:, i], alpha=0.2, label="SimNet Physics", color="lightblue")
+        ax.scatter(physics_preds[:, i], simnet_physics_preds[:, i], alpha=0.3, label="SimNet Physics", color="blue")
+        ax.scatter(physics_preds[:, i], simnet_preds[:, i], alpha=0.3, label="Fine-Tuned SimNet", color="green")
         ax.plot(
             [min(physics_preds[:, i]), max(physics_preds[:, i])],
             [min(physics_preds[:, i]), max(physics_preds[:, i])],
