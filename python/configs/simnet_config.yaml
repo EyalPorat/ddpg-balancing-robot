@@ -3,8 +3,7 @@
 # Model architecture
 model:
   hidden_dims: [8, 8, 8]
-  learning_rate: 0.0001
-  dropout_rate: 0.25
+  dropout_rate: 0.2
   activation: "relu"
   layer_norm: true
 
@@ -21,7 +20,8 @@ data_collection:
 training:
   # Physics-based pretraining
   pretrain:
-    epochs: 50
+    learning_rate: 0.0001
+    epochs: 30
     batch_size: 512
     early_stopping_patience: 10
     reduce_lr_patience: 4
@@ -30,7 +30,8 @@ training:
 
   # Real-data fine-tuning
   finetune:
-    epochs: 20
+    learning_rate: 0.00001
+    epochs: 10
     batch_size: 128
     early_stopping_patience: 5
     reduce_lr_patience: 3

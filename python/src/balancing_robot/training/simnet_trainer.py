@@ -45,7 +45,7 @@ class SimNetTrainer:
         ).to(device)
 
         # Initialize optimizer and scheduler
-        self.optimizer = torch.optim.Adam(self.simnet.parameters(), lr=model_config["learning_rate"])
+        self.optimizer = torch.optim.Adam(self.simnet.parameters())
 
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
@@ -138,9 +138,6 @@ class SimNetTrainer:
                 # Zero action for all motors, letting it fall
                 a_t = np.zeros(self.env.action_space.shape, dtype=np.float32)
                 next_state, _, done, _, _ = self.env.step(a_t)
-
-                # Add observation noise to next_state
-                next_state = next_state + np.random.normal(0, observation_noise_std, size=next_state.shape)
 
                 states.append(s_t)
                 actions.append(a_t)
@@ -341,6 +338,9 @@ class SimNetTrainer:
         num_epochs = train_config["epochs"]
         batch_size = train_config["batch_size"]
         early_stopping_patience = train_config["early_stopping_patience"]
+
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = train_config["learning_rate"]
 
         logger = TrainingLogger(log_dir) if log_dir else None
         best_val_loss = float("inf")
