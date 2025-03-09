@@ -72,7 +72,8 @@ class ModelAnalyzer:
         # Get state ranges from environment config if available
         if "observation" in self.env_config:
             obs_config = self.env_config["observation"]
-            angle_limit = obs_config.get("angle_limit", np.pi / 2)
+            termination_config = self.env_config["termination"]
+            angle_limit = termination_config.get("max_angle", np.pi / 4)
             velocity_limit = obs_config.get("angular_velocity_limit", 8.0)
 
             self.theta_range = np.linspace(-angle_limit, angle_limit, 100)
