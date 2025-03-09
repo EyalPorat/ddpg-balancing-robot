@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 # Add the project module to the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from python.src.balancing_robot.models import Actor
+from python.src.balancing_robot.models import Actor, SimNet
 from python.src.balancing_robot.environment import BalancerEnv
 
 
@@ -58,8 +58,16 @@ class ModelAnalyzer:
         # Initialize model
         self.actor = self._load_model()
 
+        self.simnet = SimNet(
+            state_dim=2,
+            action_dim=1,
+            hidden_dims=(8, 8, 8)
+        )
+
+        self.simnet.load_state_dict(torch.load('python/notebooks/logs/simnet_training/simnet_final.pt')['state_dict'])
+
         # Load environment for reference values
-        self.env = BalancerEnv(config_path=env_config_path)
+        self.env = BalancerEnv(config_path=env_config_path, simnet=self.simnet)
 
         # Get state ranges from environment config if available
         if "observation" in self.env_config:
