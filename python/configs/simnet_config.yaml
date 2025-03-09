@@ -4,7 +4,7 @@
 model:
   hidden_dims: [8, 8, 8]
   learning_rate: 0.0001
-  dropout_rate: 0.2
+  dropout_rate: 0.25
   activation: "relu"
   layer_norm: true
 

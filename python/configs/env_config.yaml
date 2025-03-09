@@ -26,19 +26,19 @@ observation:
   angle_limit: 1.57079632679  # pi/2 radians (90 degrees)
   angular_velocity_limit: 8.0  # rad/s
 
-  noise_std: 0.02  # observation noise
+  noise_std: 0.03  # observation noise
 
 # Reward parameters
 reward:
-  angle_weight: 2.0
-  angular_velocity_weight: 0.2
+  angle_weight: 1.0
+  angular_velocity_weight: 0.1
   
   # Exponential decay factors
   angle_decay: 10.0
 
 # Episode termination
 termination:
-  max_angle: 1.22173  # 70 degrees in radians
+  max_angle: 0.959931  # 55 degrees in radians
   max_steps: 500
 
 # Rendering
