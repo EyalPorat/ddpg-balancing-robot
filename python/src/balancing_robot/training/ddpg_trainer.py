@@ -249,6 +249,11 @@ class DDPGTrainer:
         if logger:
             logger.save()
 
+        # Final model saving
+            if log_dir:
+                save_model(self.actor, Path(log_dir) / "actor_final.pt")
+                save_model(self.critic, Path(log_dir) / "critic_final.pt")
+
         return logger.metrics if logger else {}
 
     def evaluate(self, num_episodes: int = 5, max_steps: int = 500) -> float:
