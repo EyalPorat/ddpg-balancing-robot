@@ -26,6 +26,8 @@ observation:
   angle_limit: 1.57079632679  # pi/2 radians (90 degrees)
   angular_velocity_limit: 8.0  # rad/s
 
+  noise_std: 0.02  # observation noise
+
 # Reward parameters
 reward:
   angle_weight: 1.0

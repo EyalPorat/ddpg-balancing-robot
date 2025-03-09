@@ -138,6 +138,11 @@ class BalancerEnv(gym.Env):
             a_tensor = torch.tensor(action, dtype=torch.float32, device=self.device).unsqueeze(0)
             self.state = self.simnet(s_tensor, a_tensor).cpu().detach().numpy()[0]
 
+        # Add noise to state
+        if self.config:
+            noise_std = self.config["observation"]["noise_std"]
+            self.state += self.np_random.normal(0, noise_std, size=self.state.shape)
+
         self.steps += 1
 
         # Calculate rewards
