@@ -106,7 +106,7 @@ class SimNetTrainer:
         2. Taking no action Episodes (letting the system fall on its own)
         3. Taking random action episodes (with noise)
         4. Adding observation noise to increase robustness
-        5. Not breaking on 'done' so we gather the full episode
+        5. Breaking on 'done' for noise-included episodes
         """
         config = self.config["data_collection"]
         num_samples = config["physics_samples"]
@@ -146,7 +146,10 @@ class SimNetTrainer:
                 actions.append(a_t)
                 next_states.append(next_state.copy())
 
-                # Keep going even if done == True (we are ignoring terminal conditions)
+                # break if angle is too large
+                if state[0] > np.pi / 2 or state[0] < -np.pi / 2:
+                    break
+
                 state = next_state
 
         # (2) Random actions episodes
@@ -175,7 +178,10 @@ class SimNetTrainer:
                 actions.append(a_t)
                 next_states.append(next_state.copy())
 
-                # do not break on done
+                # break if angle is too large
+                if state[0] > np.pi / 2 or state[0] < -np.pi / 2:
+                    break
+
                 state = next_state
 
         # Convert to numpy arrays

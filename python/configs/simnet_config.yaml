@@ -10,7 +10,7 @@ model:
 
 # Training data collection
 data_collection:
-  physics_samples: 500000
+  physics_samples: 1000000
   real_samples: 10000
   noise_std: 0.1              # Action noise
   observation_noise_std: 0.01  # observation noise
