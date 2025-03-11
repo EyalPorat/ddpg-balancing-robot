@@ -31,7 +31,7 @@ observation:
 # Reward parameters
 reward:
   angle_weight: 1.0
-  angular_velocity_weight: 0.1
+  angular_velocity_weight: 0.01
   
   # Exponential decay factors
   angle_decay: 15.0
