@@ -154,7 +154,7 @@ class BalancerEnv(gym.Env):
 
         # Check if reached stable state
         min_angle_for_stable = np.deg2rad(5)
-        min_angular_velocity_for_stable = np.deg2rad(20)
+        min_angular_velocity_for_stable = np.deg2rad(10)
         reached_stable = abs(self.state[0]) < min_angle_for_stable and abs(self.state[1]) < min_angular_velocity_for_stable
 
         # Additional info
@@ -162,8 +162,8 @@ class BalancerEnv(gym.Env):
             "state_of_interest": {
                 "angle": self.state[0],
                 "energy": self.physics.get_energy(self.state),
-                "reached_stable": reached_stable,
-            }
+            },
+            "reached_stable": reached_stable
         }
 
         if self.render_mode == "human":
