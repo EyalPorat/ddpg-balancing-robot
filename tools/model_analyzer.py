@@ -58,13 +58,9 @@ class ModelAnalyzer:
         # Initialize model
         self.actor = self._load_model()
 
-        self.simnet = SimNet(
-            state_dim=2,
-            action_dim=1,
-            hidden_dims=(8, 8, 8)
-        )
+        self.simnet = SimNet(state_dim=2, action_dim=1, hidden_dims=(32, 32, 32))
 
-        self.simnet.load_state_dict(torch.load('python/notebooks/logs/simnet_training/simnet_final.pt')['state_dict'])
+        self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/simnet_final.pt")["state_dict"])
 
         # Load environment for reference values
         self.env = BalancerEnv(config_path=env_config_path, simnet=self.simnet)
@@ -514,40 +510,44 @@ class ModelAnalyzer:
     def analyze_controller_nonlinearity(self):
         """Analyze the nonlinearity of the controller by comparing it to linear approximations."""
         print("Analyzing controller nonlinearity...")
-        
+
         # Create a dense grid around the balanced state
         balanced_theta = 0.0
         balanced_theta_dot = 0.0
-        
+
         # Compute action at balanced state
-        balanced_action = self.predict_actions(np.array([[balanced_theta, balanced_theta_dot]]))[0][0]  # Get scalar value
-        
+        balanced_action = self.predict_actions(np.array([[balanced_theta, balanced_theta_dot]]))[0][
+            0
+        ]  # Get scalar value
+
         # Create small perturbation range
         delta = 0.05
-        thetas = np.linspace(-20*delta, 20*delta, 100)
-        theta_dots = np.linspace(-20*delta, 20*delta, 100)
-        
+        thetas = np.linspace(-20 * delta, 20 * delta, 100)
+        theta_dots = np.linspace(-20 * delta, 20 * delta, 100)
+
         # Compute actions for varying theta (with theta_dot = 0)
         theta_only_states = np.array([[theta, 0.0] for theta in thetas])
         theta_only_actions = self.predict_actions(theta_only_states).flatten()  # Flatten to 1D array
-        
+
         # Compute actions for varying theta_dot (with theta = 0)
         theta_dot_only_states = np.array([[0.0, theta_dot] for theta_dot in theta_dots])
         theta_dot_only_actions = self.predict_actions(theta_dot_only_states).flatten()  # Flatten to 1D array
-        
+
         # Compute linear approximation coefficients (partial derivatives at origin)
         # Make sure to extract scalar values
         k_theta = float((theta_only_actions[51] - theta_only_actions[49]) / (thetas[51] - thetas[49]))
-        k_theta_dot = float((theta_dot_only_actions[51] - theta_dot_only_actions[49]) / (theta_dots[51] - theta_dots[49]))
-        
+        k_theta_dot = float(
+            (theta_dot_only_actions[51] - theta_dot_only_actions[49]) / (theta_dots[51] - theta_dots[49])
+        )
+
         # Create linear approximation models
         linear_theta_actions = balanced_action + k_theta * (thetas - balanced_theta)
         linear_theta_dot_actions = balanced_action + k_theta_dot * (theta_dots - balanced_theta_dot)
-        
+
         # Plot theta nonlinearity
         plt.figure(figsize=(12, 8))
-        plt.plot(thetas * 180/np.pi, theta_only_actions, label="DDPG Controller")
-        plt.plot(thetas * 180/np.pi, linear_theta_actions, 'r--', label="Linear Approximation")
+        plt.plot(thetas * 180 / np.pi, theta_only_actions, label="DDPG Controller")
+        plt.plot(thetas * 180 / np.pi, linear_theta_actions, "r--", label="Linear Approximation")
         plt.xlabel("Angle θ (degrees)")
         plt.ylabel("Action (torque)")
         plt.title(f"Controller Nonlinearity w.r.t. Angle (k_θ = {k_theta:.2f})")
@@ -555,11 +555,11 @@ class ModelAnalyzer:
         plt.legend()
         plt.tight_layout()
         plt.savefig(self.output_dir / "theta_nonlinearity.png")
-        
+
         # Plot theta_dot nonlinearity
         plt.figure(figsize=(12, 8))
         plt.plot(theta_dots, theta_dot_only_actions, label="DDPG Controller")
-        plt.plot(theta_dots, linear_theta_dot_actions, 'r--', label="Linear Approximation")
+        plt.plot(theta_dots, linear_theta_dot_actions, "r--", label="Linear Approximation")
         plt.xlabel("Angular Velocity θ̇ (rad/s)")
         plt.ylabel("Action (torque)")
         plt.title(f"Controller Nonlinearity w.r.t. Angular Velocity (k_θ̇ = {k_theta_dot:.2f})")
@@ -567,44 +567,48 @@ class ModelAnalyzer:
         plt.legend()
         plt.tight_layout()
         plt.savefig(self.output_dir / "theta_dot_nonlinearity.png")
-        
+
         # Create 2D nonlinearity analysis
         theta_mesh, theta_dot_mesh = np.meshgrid(thetas, theta_dots)
         states = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten()))
-        
+
         # Predict DDPG controller actions
         actions = self.predict_actions(states)
         action_mesh = actions.reshape(theta_mesh.shape)
-        
+
         # Create 2D linear approximation
-        linear_approx = balanced_action + k_theta * (theta_mesh - balanced_theta) + k_theta_dot * (theta_dot_mesh - balanced_theta_dot)
-        
+        linear_approx = (
+            balanced_action
+            + k_theta * (theta_mesh - balanced_theta)
+            + k_theta_dot * (theta_dot_mesh - balanced_theta_dot)
+        )
+
         # Calculate nonlinearity (difference between DDPG and linear approximation)
         nonlinearity = action_mesh - linear_approx
-        
+
         # Plot 2D nonlinearity heatmap
         plt.figure(figsize=(12, 10))
-        
+
         plt.pcolormesh(
-            thetas * 180/np.pi, 
-            theta_dots, 
-            nonlinearity, 
-            cmap='RdBu',
-            shading='auto',
+            thetas * 180 / np.pi,
+            theta_dots,
+            nonlinearity,
+            cmap="RdBu",
+            shading="auto",
             vmin=-np.max(np.abs(nonlinearity)),
-            vmax=np.max(np.abs(nonlinearity))
+            vmax=np.max(np.abs(nonlinearity)),
         )
-        
+
         plt.colorbar(label="Nonlinearity (Action - Linear Approx)")
         plt.xlabel("Angle θ (degrees)")
         plt.ylabel("Angular Velocity θ̇ (rad/s)")
         plt.title("Controller Nonlinearity Map")
-        plt.axhline(y=0, color='k', linestyle='--', alpha=0.3)
-        plt.axvline(x=0, color='k', linestyle='--', alpha=0.3)
+        plt.axhline(y=0, color="k", linestyle="--", alpha=0.3)
+        plt.axvline(x=0, color="k", linestyle="--", alpha=0.3)
         plt.grid(alpha=0.3)
         plt.tight_layout()
         plt.savefig(self.output_dir / "2d_nonlinearity.png", dpi=300)
-        
+
         print("Nonlinearity analysis completed and saved.")
 
     def analyze_simulated_trajectories(self):
@@ -753,11 +757,11 @@ class ModelAnalyzer:
 
         # Choose reasonable PD gains that achieve similar performance to the DDPG
         # These would typically be tuned for the specific robot
-        kp = 35.0  # Proportional gain
-        kd = 0.8  # Derivative gain
+        kp = 20.0  # Proportional gain
+        kd = 1  # Derivative gain
 
         # Create lambda function for PD controller
-        pd_controller = lambda theta, theta_dot: -(kp * theta + kd * theta_dot)
+        pd_controller = lambda theta, theta_dot: (kp * theta + kd * theta_dot)
 
         # Create state grid for comparison
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
@@ -808,6 +812,11 @@ class ModelAnalyzer:
             vmax=np.max(np.abs(pd_action_mesh)),
         )
         plt.colorbar(im2, ax=axs[0, 1], label="Torque")
+        # Mark zero action contour distinctly for PD controller
+        zero_contour_pd = axs[0, 1].contour(
+            theta_degrees, self.theta_dot_range, pd_action_mesh, levels=[0], colors="green", linewidths=2
+        )
+        axs[0, 1].clabel(zero_contour_pd, inline=True, fontsize=10, fmt="0")
         axs[0, 1].set_title(f"PD Controller (Kp={kp}, Kd={kd})")
         axs[0, 1].set_xlabel("Angle θ (degrees)")
         axs[0, 1].set_ylabel("Angular Velocity θ̇ (rad/s)")
