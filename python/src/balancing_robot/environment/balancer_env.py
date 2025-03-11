@@ -99,7 +99,7 @@ class BalancerEnv(gym.Env):
 
         # Initialize with random angle and angular velocity
         theta_deg = self.np_random.uniform(-60, 60)  # theta in degrees
-        theta_dot_deg = self.np_random.uniform(-240, 240)  # theta_dot in degrees per second
+        theta_dot_deg = self.np_random.uniform(-100, 100)  # theta_dot in degrees per second
 
         self.state = np.array(
             [
@@ -186,7 +186,7 @@ class BalancerEnv(gym.Env):
 
         reward = w["angle"] * angle_reward + w["angular_velocity"] * angular_vel_penalty
 
-        if self._check_termination():
+        if self._check_termination() or self.steps >= self.max_steps:
             reward -= 50
 
         return reward
