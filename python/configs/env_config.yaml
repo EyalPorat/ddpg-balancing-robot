@@ -30,8 +30,8 @@ observation:
 
 # Reward parameters
 reward:
-  reached_stable_bonus: 500.0
-  angle_weight: 5.0
+  reached_stable_bonus: 869.0
+  angle_weight: 1.0
   angular_velocity_weight: 0.005
   
   # Exponential decay factors
