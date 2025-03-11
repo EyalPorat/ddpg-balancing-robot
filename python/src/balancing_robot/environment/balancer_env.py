@@ -152,11 +152,17 @@ class BalancerEnv(gym.Env):
         terminated = self._check_termination()
         truncated = self.steps >= self.max_steps
 
+        # Check if reached stable state
+        min_angle_for_stable = np.deg2rad(5)
+        min_angular_velocity_for_stable = np.deg2rad(5)
+        reached_stable = abs(self.state[0]) < min_angle_for_stable and abs(self.state[1]) < min_angular_velocity_for_stable
+
         # Additional info
         info = {
             "state_of_interest": {
                 "angle": self.state[0],
                 "energy": self.physics.get_energy(self.state),
+                "reached_stable": reached_stable,
             }
         }
 
