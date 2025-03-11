@@ -99,7 +99,7 @@ class BalancerEnv(gym.Env):
 
         # Initialize with random angle and angular velocity
         theta_deg = self.np_random.uniform(-60, 60)  # theta in degrees
-        theta_dot_deg = self.np_random.uniform(-120, 120)  # theta_dot in degrees per second
+        theta_dot_deg = self.np_random.uniform(-240, 240)  # theta_dot in degrees per second
 
         self.state = np.array(
             [
@@ -154,7 +154,7 @@ class BalancerEnv(gym.Env):
 
         # Check if reached stable state
         min_angle_for_stable = np.deg2rad(5)
-        min_angular_velocity_for_stable = np.deg2rad(10)
+        min_angular_velocity_for_stable = np.deg2rad(5)
         reached_stable = abs(self.state[0]) < min_angle_for_stable and abs(self.state[1]) < min_angular_velocity_for_stable
 
         # Additional info
