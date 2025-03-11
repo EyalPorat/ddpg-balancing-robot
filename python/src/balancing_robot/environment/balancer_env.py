@@ -77,12 +77,14 @@ class BalancerEnv(gym.Env):
                 "angle": reward_config["angle_weight"],
                 "angular_velocity": reward_config["angular_velocity_weight"],
                 "angle_decay": reward_config["angle_decay"],
+                "reached_stable_bonus": reward_config["reached_stable_bonus"],
             }
         else:
             self.reward_weights = {
                 "angle": 2.0,
                 "angular_velocity": 3.0,
                 "angle_decay": 10.0,
+                "reached_stable_bonus": 500.0,
             }
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
@@ -103,8 +105,8 @@ class BalancerEnv(gym.Env):
 
         self.state = np.array(
             [
-            np.deg2rad(theta_deg),  # Convert theta to radians
-            np.deg2rad(theta_dot_deg),  # Convert theta_dot to radians per second
+                np.deg2rad(theta_deg),  # Convert theta to radians
+                np.deg2rad(theta_dot_deg),  # Convert theta_dot to radians per second
             ]
         )
 
@@ -145,17 +147,19 @@ class BalancerEnv(gym.Env):
 
         self.steps += 1
 
+        # Check if reached stable state
+        min_angle_for_stable = np.deg2rad(5)
+        min_angular_velocity_for_stable = np.deg2rad(10)
+        reached_stable = (
+            abs(self.state[0]) < min_angle_for_stable and abs(self.state[1]) < min_angular_velocity_for_stable
+        )
+
         # Calculate rewards
-        reward = self._compute_reward()
+        reward = self._compute_reward(reached_stable)
 
         # Check termination conditions
         terminated = self._check_termination()
         truncated = self.steps >= self.max_steps
-
-        # Check if reached stable state
-        min_angle_for_stable = np.deg2rad(5)
-        min_angular_velocity_for_stable = np.deg2rad(10)
-        reached_stable = abs(self.state[0]) < min_angle_for_stable and abs(self.state[1]) < min_angular_velocity_for_stable
 
         # Additional info
         info = {
@@ -163,7 +167,7 @@ class BalancerEnv(gym.Env):
                 "angle": self.state[0],
                 "energy": self.physics.get_energy(self.state),
             },
-            "reached_stable": reached_stable
+            "reached_stable": reached_stable,
         }
 
         if self.render_mode == "human":
@@ -171,7 +175,7 @@ class BalancerEnv(gym.Env):
 
         return self.state, reward, terminated, truncated, info
 
-    def _compute_reward(self) -> float:
+    def _compute_reward(self, reached_stable: bool) -> float:
         """Compute reward based on current state."""
         w = self.reward_weights
 
@@ -188,6 +192,9 @@ class BalancerEnv(gym.Env):
 
         if self._check_termination() or self.steps >= self.max_steps:
             reward -= 50
+
+        if reached_stable:
+            reward += w["reached_stable_bonus"]
 
         return reward
 
