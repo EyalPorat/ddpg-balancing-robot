@@ -9,7 +9,7 @@ model:
 
 # Training data collection
 data_collection:
-  physics_samples: 20000000
+  physics_samples: 1000000
   real_samples: 10000
   noise_std: 0.1              # Action noise
   observation_noise_std: 0.01  # observation noise
@@ -37,6 +37,14 @@ training:
     reduce_lr_patience: 3
     reduce_lr_factor: 0.5
     min_lr: 0.0000001
+
+  # Class balancing settings
+  class_balancing:
+    enabled: true
+    num_bins: 15
+    strategy: "quantile"     # Options: 'uniform', 'quantile', 'kmeans'
+    sample_weights: false     # Use weighted sampling during training
+    oversample: true        # Alternative to weighted sampling
 
 # Hybrid simulation settings
 hybrid:

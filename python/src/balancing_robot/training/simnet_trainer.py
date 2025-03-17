@@ -4,6 +4,7 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from tqdm import tqdm
+from sklearn.preprocessing import KBinsDiscretizer
 
 from ..models import SimNet
 from ..environment import BalancerEnv
@@ -89,6 +90,13 @@ class SimNetTrainer:
                     "reduce_lr_patience": 3,
                     "reduce_lr_factor": 0.5,
                     "min_lr": 0.00001,
+                },
+                "class_balancing": {
+                    "enabled": False,
+                    "num_bins": 10,
+                    "strategy": "uniform",
+                    "sample_weights": False,
+                    "oversample": False,
                 },
             },
             "hybrid": {
@@ -268,7 +276,145 @@ class SimNetTrainer:
 
         return train_data, val_data
 
+    @staticmethod
+    def calculate_class_weights(states: np.ndarray, num_bins: int = 10, strategy: str = "uniform") -> np.ndarray:
+        """Calculate class weights for balanced sampling based on state distribution.
+
+        Args:
+            states: Array of states to classify
+            num_bins: Number of bins for discretizing the state space
+            strategy: Binning strategy ('uniform', 'quantile', or 'kmeans')
+
+        Returns:
+            Array of sample weights corresponding to each state
+        """
+        # Create discretizer for state binning
+        discretizer = KBinsDiscretizer(n_bins=num_bins, encode="ordinal", strategy=strategy)
+
+        # Fit on angle and angular velocity separately
+        angle_bins = discretizer.fit_transform(states[:, 0].reshape(-1, 1))
+        angular_vel_bins = discretizer.fit_transform(states[:, 1].reshape(-1, 1))
+
+        # Combine the bins to create a 2D grid of state space
+        combined_bins = angle_bins * num_bins + angular_vel_bins
+        combined_bins = combined_bins.astype(int).flatten()
+
+        # Count occurrences of each state class
+        bin_counts = np.bincount(combined_bins)
+
+        # Calculate inverse frequency weights (higher for rare states)
+        inv_bin_freq = 1.0 / (bin_counts + 1e-8)  # Add small epsilon to avoid div by zero
+
+        # Normalize weights
+        norm_weights = inv_bin_freq / np.sum(inv_bin_freq) * len(inv_bin_freq)
+
+        # Map weights back to samples
+        sample_weights = norm_weights[combined_bins]
+
+        return sample_weights
+
+    @staticmethod
+    def create_balanced_dataset(
+        data: Dict[str, np.ndarray], num_bins: int = 10, strategy: str = "uniform"
+    ) -> Dict[str, np.ndarray]:
+        """Create a balanced dataset using oversampling of minority classes.
+
+        Args:
+            data: Dictionary containing training data
+            num_bins: Number of bins for discretizing the state space
+            strategy: Binning strategy ('uniform', 'quantile', or 'kmeans')
+
+        Returns:
+            Dictionary containing balanced training data
+        """
+        states = data["states"]
+        actions = data["actions"]
+        next_states = data["next_states"]
+
+        # Create discretizer
+        discretizer = KBinsDiscretizer(n_bins=num_bins, encode="ordinal", strategy=strategy)
+
+        # Discretize states to identify classes
+        angle_bins = discretizer.fit_transform(states[:, 0].reshape(-1, 1))
+        angular_vel_bins = discretizer.fit_transform(states[:, 1].reshape(-1, 1))
+
+        # Combine the bins to create a 2D grid of state space
+        combined_bins = (angle_bins * num_bins + angular_vel_bins).astype(int).flatten()
+
+        # Count occurrences of each bin
+        unique_bins, bin_counts = np.unique(combined_bins, return_counts=True)
+
+        # Find the class with maximum number of samples
+        max_samples = np.max(bin_counts)
+
+        # Initialize arrays for balanced data
+        balanced_states = []
+        balanced_actions = []
+        balanced_next_states = []
+
+        # For each bin, either keep all samples or oversample
+        for bin_idx in unique_bins:
+            # Get indices belonging to this bin
+            bin_indices = np.where(combined_bins == bin_idx)[0]
+
+            # If we need to oversample
+            if len(bin_indices) < max_samples:
+                # Number of additional samples needed
+                additional_samples = max_samples - len(bin_indices)
+
+                # Randomly sample with replacement
+                oversample_indices = np.random.choice(bin_indices, size=additional_samples, replace=True)
+
+                # Combine original and oversampled indices
+                all_indices = np.concatenate([bin_indices, oversample_indices])
+            else:
+                # Keep original samples if this bin has enough
+                all_indices = bin_indices
+
+            # Add to balanced dataset
+            balanced_states.append(states[all_indices])
+            balanced_actions.append(actions[all_indices])
+            balanced_next_states.append(next_states[all_indices])
+
+        # Concatenate all balanced data
+        balanced_data = {
+            "states": np.vstack(balanced_states),
+            "actions": np.vstack(balanced_actions),
+            "next_states": np.vstack(balanced_next_states),
+        }
+
+        return balanced_data
+
+    @staticmethod
+    def prepare_weighted_batch_indices(data_size: int, batch_size: int, weights: np.ndarray) -> List[np.ndarray]:
+        """Prepare batch indices with weighted sampling.
+
+        Args:
+            data_size: Size of the dataset
+            batch_size: Size of each batch
+            weights: Sample weights for weighting the distribution
+
+        Returns:
+            List of batches with indices
+        """
+        # Normalize weights for sampling
+        weights = weights / np.sum(weights)
+
+        # Number of complete batches
+        num_batches = data_size // batch_size
+
+        batches = []
+        for _ in range(num_batches):
+            # Sample indices according to weights
+            batch_indices = np.random.choice(
+                data_size, size=batch_size, replace=True, p=weights  # Allow replacement for balanced sampling
+            )
+            batches.append(batch_indices)
+
+        return batches
+
     def train_epoch(self, train_data: Dict[str, np.ndarray], batch_size: int) -> Dict[str, float]:
+        """Train for one epoch."""
         self.simnet.train()
         total_loss = 0
 
@@ -324,6 +470,52 @@ class SimNetTrainer:
 
         return {"val_loss": total_loss / num_batches}
 
+    @staticmethod
+    def analyze_class_distribution(
+        data: Dict[str, np.ndarray], num_bins: int = 10, strategy: str = "uniform"
+    ) -> Dict[str, Any]:
+        """Analyze and visualize the class distribution in data.
+
+        Args:
+            data: Dictionary containing training data
+            num_bins: Number of bins for discretizing the state space
+            strategy: Binning strategy ('uniform', 'quantile', or 'kmeans')
+
+        Returns:
+            Dictionary with distribution statistics
+        """
+        states = data["states"]
+
+        # Calculate statistics
+        angle_range = (np.min(states[:, 0]), np.max(states[:, 0]))
+        angle_mean = np.mean(states[:, 0])
+        angle_std = np.std(states[:, 0])
+
+        angular_vel_range = (np.min(states[:, 1]), np.max(states[:, 1]))
+        angular_vel_mean = np.mean(states[:, 1])
+        angular_vel_std = np.std(states[:, 1])
+
+        # Calculate sample weights (inverse frequency)
+        sample_weights = SimNetTrainer.calculate_class_weights(states, num_bins, strategy)
+        weight_stats = {
+            "min_weight": np.min(sample_weights),
+            "max_weight": np.max(sample_weights),
+            "mean_weight": np.mean(sample_weights),
+            "std_weight": np.std(sample_weights),
+        }
+
+        # Return distribution statistics
+        return {
+            "angle_range": angle_range,
+            "angle_mean": angle_mean,
+            "angle_std": angle_std,
+            "angular_vel_range": angular_vel_range,
+            "angular_vel_mean": angular_vel_mean,
+            "angular_vel_std": angular_vel_std,
+            "num_samples": len(states),
+            **weight_stats,
+        }
+
     def train(
         self,
         train_data: Dict[str, np.ndarray],
@@ -339,8 +531,10 @@ class SimNetTrainer:
         batch_size = train_config["batch_size"]
         early_stopping_patience = train_config["early_stopping_patience"]
 
+        # Set learning rate
+        lr = train_config.get("learning_rate", 0.001)
         for param_group in self.optimizer.param_groups:
-            param_group['lr'] = train_config["learning_rate"]
+            param_group["lr"] = lr
 
         logger = TrainingLogger(log_dir) if log_dir else None
         best_val_loss = float("inf")
