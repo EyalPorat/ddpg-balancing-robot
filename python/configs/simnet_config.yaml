@@ -2,7 +2,7 @@
 
 # Model architecture
 model:
-  hidden_dims: [8, 8, 8]
+  hidden_dims: [32, 32, 32]
   dropout_rate: 0.25
   activation: "relu"
   layer_norm: true
@@ -31,7 +31,7 @@ training:
   # Real-data fine-tuning
   finetune:
     learning_rate: 0.000005
-    epochs: 30
+    epochs: 10
     batch_size: 128
     early_stopping_patience: 5
     reduce_lr_patience: 3
@@ -42,7 +42,7 @@ training:
   class_balancing:
     enabled: true
     num_bins: 15
-    strategy: "quantile"     # Options: 'uniform', 'quantile', 'kmeans'
+    strategy: "uniform"     # Options: 'uniform', 'quantile', 'kmeans'
     sample_weights: false     # Use weighted sampling during training
     oversample: true        # Alternative to weighted sampling
 
