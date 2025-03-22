@@ -2,14 +2,14 @@
 
 # Model architecture
 model:
-  hidden_dims: [32, 32, 32]
+  hidden_dims: [128, 128, 128]
   dropout_rate: 0.25
   activation: "relu"
   layer_norm: true
 
 # Training data collection
 data_collection:
-  physics_samples: 1000000
+  physics_samples: 2000000
   real_samples: 10000
   noise_std: 0.1              # Action noise
   observation_noise_std: 0.01  # observation noise
@@ -20,7 +20,7 @@ data_collection:
 training:
   # Physics-based pretraining
   pretrain:
-    learning_rate: 0.0001
+    learning_rate: 0.00005
     epochs: 30
     batch_size: 512
     early_stopping_patience: 10
@@ -42,7 +42,7 @@ training:
   class_balancing:
     enabled: true
     num_bins: 15
-    strategy: "uniform"     # Options: 'uniform', 'quantile', 'kmeans'
+    strategy: "kmeans"     # Options: 'uniform', 'quantile', 'kmeans'
     sample_weights: false     # Use weighted sampling during training
     oversample: true        # Alternative to weighted sampling
 
