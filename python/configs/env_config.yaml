@@ -30,9 +30,9 @@ observation:
 
 # Reward parameters
 reward:
-  reached_stable_bonus: 50.0
-  angle_weight: 1.0
-  angular_velocity_weight: 0.001
+  reached_stable_bonus: 100.0
+  angle_weight: 2.0
+  angular_velocity_weight: 0.004
   
   # Exponential decay factors
   angle_decay: 15.0
@@ -40,7 +40,7 @@ reward:
 # Episode termination
 termination:
   max_angle: 1.0472  # 60 degrees in radians
-  max_steps: 100
+  max_steps: 200
 
 # Rendering
 render:

@@ -13,7 +13,7 @@ model:
 # Training parameters
 training:
   total_episodes: 1000
-  max_steps_per_episode: 100
+  max_steps_per_episode: 200
   batch_size: 512
   gamma: 0.99  # Discount factor
   tau: 0.005   # Target network update rate
