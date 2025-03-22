@@ -191,7 +191,7 @@ class BalancerEnv(gym.Env):
         reward = w["angle"] * angle_reward + w["angular_velocity"] * angular_vel_penalty
 
         if self._check_termination() or self.steps >= self.max_steps:
-            reward -= 50
+            reward -= 200
 
         if reached_stable:
             reward += w["reached_stable_bonus"]
