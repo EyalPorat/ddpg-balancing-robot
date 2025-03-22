@@ -205,7 +205,7 @@ class DDPGTrainer:
             for step in range(max_steps):
                 # Select and perform action
                 action = self.select_action(state)
-                next_state, reward, done, truncated, info = self.env.step(action)
+                next_state, reward, done, _, info = self.env.step(action)
 
                 # Store transition
                 self.replay_buffer.push(state, action, reward, next_state, done)
@@ -240,15 +240,15 @@ class DDPGTrainer:
                 # Save best model
                 if eval_reward > best_reward and log_dir:
                     best_reward = eval_reward
-                    save_model(self.actor, Path(log_dir) / "best_actor.pt", {"episode": episode, "reward": eval_reward})
+                    save_model(self.actor, Path(log_dir) / "best_actor.pt", {"episode": int(episode), "reward": float(eval_reward)})
                     save_model(
-                        self.critic, Path(log_dir) / "best_critic.pt", {"episode": episode, "reward": eval_reward}
+                        self.critic, Path(log_dir) / "best_critic.pt", {"episode": int(episode), "reward": float(eval_reward)}
                     )
 
             # Regular saving
             if log_dir and (episode + 1) % save_freq == 0:
-                save_model(self.actor, Path(log_dir) / f"actor_episode_{episode+1}.pt", {"episode": episode})
-                save_model(self.critic, Path(log_dir) / f"critic_episode_{episode+1}.pt", {"episode": episode})
+                save_model(self.actor, Path(log_dir) / f"actor_episode_{episode+1}.pt", {"episode": int(episode)})
+                save_model(self.critic, Path(log_dir) / f"critic_episode_{episode+1}.pt", {"episode": int(episode)})
 
         if logger:
             logger.save()
