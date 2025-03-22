@@ -61,11 +61,8 @@ public:
         : l1_weights(hidden_dim, state_dim),
           l1_bias(hidden_dim, 1),
           l1_norm(hidden_dim),
-          l2_weights(hidden_dim, hidden_dim),
-          l2_bias(hidden_dim, 1),
-          l2_norm(hidden_dim),
-          l3_weights(action_dim, hidden_dim),
-          l3_bias(action_dim, 1),
+          l2_weights(action_dim, hidden_dim),
+          l2_bias(action_dim, 1),
           max_action(max_action) {}
 
     bool loadWeights(const char* filename) {
@@ -78,213 +75,261 @@ public:
         Serial.printf("Opened weights file, size: %d bytes\n", file.size());
         size_t currentPosition = 0;
 
-        // For each layer, read shape and data
-        for (const char* layerName : {"l1", "l2", "l3"}) {
-            uint32_t rows, cols;
-            
-            Serial.printf("\n=== Reading layer %s at position %d ===\n", layerName, currentPosition);
-            
-            // Debug: Read and print raw bytes for dimensions
-            uint8_t dim_bytes[8];
-            size_t bytes_read = file.read(dim_bytes, 8);
-            if (bytes_read != 8) {
-                Serial.printf("Failed to read dimensions bytes. Expected 8, got %d\n", bytes_read);
-                file.close();
-                return false;
-            }
-
-            Serial.printf("Raw dimension bytes: ");
-            for(int i = 0; i < 8; i++) {
-                Serial.printf("%02X ", dim_bytes[i]);
-            }
-            Serial.println();
-
-            // Convert bytes to dimensions
-            memcpy(&rows, dim_bytes, 4);
-            memcpy(&cols, dim_bytes + 4, 4);
-            currentPosition += 8;
-
-            Serial.printf("Layer %s dimensions decoded: %dx%d (at position %d)\n", 
-                        layerName, rows, cols, currentPosition);
-
-            // Sanity check dimensions
-            if (rows > 1000 || cols > 1000 || rows <= 0 || cols <= 0) {
-                Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d\n", layerName, rows, cols);
-                file.close();
-                return false;
-            }
-
-            // Calculate expected data sizes
-            size_t weights_size = rows * cols * sizeof(float);
-            size_t bias_size = rows * sizeof(float);
-            Serial.printf("Expected sizes - weights: %d bytes, bias: %d bytes\n", weights_size, bias_size);
-
-            // Read weights
-            uint8_t* weights_buffer = (uint8_t*)malloc(weights_size);
-            if (!weights_buffer) {
-                Serial.printf("Failed to allocate %d bytes for weights in layer %s\n", weights_size, layerName);
-                file.close();
-                return false;
-            }
-
-            bytes_read = file.read(weights_buffer, weights_size);
-            if (bytes_read != weights_size) {
-                Serial.printf("Failed to read weights for layer %s. Expected %d bytes, got %d\n", 
-                            layerName, weights_size, bytes_read);
-                free(weights_buffer);
-                file.close();
-                return false;
-            }
-            currentPosition += weights_size;
-
-            // Debug: Print first few weights
-            float* weights_float = (float*)weights_buffer;
-            Serial.printf("First few weights: ");
-            for(int i = 0; i < min(5, (int)(weights_size/4)); i++) {
-                Serial.printf("%f ", weights_float[i]);
-            }
-            Serial.println();
-
-            // Read biases
-            uint8_t* bias_buffer = (uint8_t*)malloc(bias_size);
-            if (!bias_buffer) {
-                Serial.printf("Failed to allocate %d bytes for bias in layer %s\n", bias_size, layerName);
-                free(weights_buffer);
-                file.close();
-                return false;
-            }
-
-            bytes_read = file.read(bias_buffer, bias_size);
-            if (bytes_read != bias_size) {
-                Serial.printf("Failed to read bias for layer %s. Expected %d bytes, got %d\n", 
-                            layerName, bias_size, bytes_read);
-                free(weights_buffer);
-                free(bias_buffer);
-                file.close();
-                return false;
-            }
-            currentPosition += bias_size;
-
-            // Debug: Print first few biases
-            float* bias_float = (float*)bias_buffer;
-            Serial.printf("First few biases: ");
-            for(int i = 0; i < min(5, (int)(bias_size/4)); i++) {
-                Serial.printf("%f ", bias_float[i]);
-            }
-            Serial.println();
-
-            // Get pointers to appropriate layer matrices
-            Matrix<float>* weights = nullptr;
-            Matrix<float>* bias = nullptr;
-            LayerNormParams* norm = nullptr;
-
-            if (strcmp(layerName, "l1") == 0) {
-                weights = &l1_weights;
-                bias = &l1_bias;
-                norm = &l1_norm;
-            } else if (strcmp(layerName, "l2") == 0) {
-                weights = &l2_weights;
-                bias = &l2_bias;
-                norm = &l2_norm;
-            } else if (strcmp(layerName, "l3") == 0) {
-                weights = &l3_weights;
-                bias = &l3_bias;
-            }
-
-            // Verify dimensions match
-            if (weights->getRows() != rows || weights->getCols() != cols) {
-                Serial.printf("Dimension mismatch for layer %s. Expected %dx%d, got %dx%d\n", 
-                            layerName, weights->getRows(), weights->getCols(), rows, cols);
-                free(weights_buffer);
-                free(bias_buffer);
-                file.close();
-                return false;
-            }
-
-            // Copy data to matrices
-            memcpy(weights->getData(), weights_buffer, weights_size);
-            memcpy(bias->getData(), bias_buffer, bias_size);
-
-            // Read LayerNorm parameters for l1 and l2
-            if (norm != nullptr) {
-                size_t norm_size = rows * sizeof(float);
-                
-                // Read gamma
-                uint8_t* gamma_buffer = (uint8_t*)malloc(norm_size);
-                if (!gamma_buffer) {
-                    Serial.printf("Failed to allocate memory for gamma in layer %s\n", layerName);
-                    free(weights_buffer);
-                    free(bias_buffer);
-                    file.close();
-                    return false;
-                }
-                
-                bytes_read = file.read(gamma_buffer, norm_size);
-                if (bytes_read != norm_size) {
-                    Serial.printf("Failed to read gamma for layer %s. Expected %d bytes, got %d\n", 
-                                layerName, norm_size, bytes_read);
-                    free(weights_buffer);
-                    free(bias_buffer);
-                    free(gamma_buffer);
-                    file.close();
-                    return false;
-                }
-
-                // Debug: Print first few gamma values
-                float* gamma_float = (float*)gamma_buffer;
-                Serial.printf("First few gamma values: ");
-                for(int i = 0; i < min(5, (int)(norm_size/4)); i++) {
-                    Serial.printf("%f ", gamma_float[i]);
-                }
-                Serial.println();
-
-                memcpy(norm->gamma.data(), gamma_buffer, norm_size);
-                free(gamma_buffer);
-                currentPosition += norm_size;
-
-                // Read beta
-                uint8_t* beta_buffer = (uint8_t*)malloc(norm_size);
-                if (!beta_buffer) {
-                    Serial.printf("Failed to allocate memory for beta in layer %s\n", layerName);
-                    free(weights_buffer);
-                    free(bias_buffer);
-                    file.close();
-                    return false;
-                }
-                
-                bytes_read = file.read(beta_buffer, norm_size);
-                if (bytes_read != norm_size) {
-                    Serial.printf("Failed to read beta for layer %s. Expected %d bytes, got %d\n", 
-                                layerName, norm_size, bytes_read);
-                    free(weights_buffer);
-                    free(bias_buffer);
-                    free(beta_buffer);
-                    file.close();
-                    return false;
-                }
-
-                // Debug: Print first few beta values
-                float* beta_float = (float*)beta_buffer;
-                Serial.printf("First few beta values: ");
-                for(int i = 0; i < min(5, (int)(norm_size/4)); i++) {
-                    Serial.printf("%f ", beta_float[i]);
-                }
-                Serial.println();
-
-                memcpy(norm->beta.data(), beta_buffer, norm_size);
-                free(beta_buffer);
-                currentPosition += norm_size;
-            }
-
-            free(weights_buffer);
-            free(bias_buffer);
-
-            Serial.printf("Successfully loaded layer %s. Total bytes read so far: %d\n", 
-                        layerName, currentPosition);
+        // Read first layer (l1)
+        const char* layerName = "l1";
+        uint32_t rows, cols;
+        
+        Serial.printf("\n=== Reading layer %s at position %d ===\n", layerName, currentPosition);
+        
+        // Debug: Read and print raw bytes for dimensions
+        uint8_t dim_bytes[8];
+        size_t bytes_read = file.read(dim_bytes, 8);
+        if (bytes_read != 8) {
+            Serial.printf("Failed to read dimensions bytes. Expected 8, got %d\n", bytes_read);
+            file.close();
+            return false;
         }
 
+        Serial.printf("Raw dimension bytes: ");
+        for(int i = 0; i < 8; i++) {
+            Serial.printf("%02X ", dim_bytes[i]);
+        }
+        Serial.println();
+
+        // Convert bytes to dimensions
+        memcpy(&rows, dim_bytes, 4);
+        memcpy(&cols, dim_bytes + 4, 4);
+        currentPosition += 8;
+
+        Serial.printf("Layer %s dimensions decoded: %dx%d (at position %d)\n", 
+                    layerName, rows, cols, currentPosition);
+
+        // Sanity check dimensions
+        if (rows != 10 || cols != 2) {
+            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 10x2\n", layerName, rows, cols);
+            file.close();
+            return false;
+        }
+
+        // Calculate expected data sizes
+        size_t weights_size = rows * cols * sizeof(float);
+        size_t bias_size = rows * sizeof(float);
+        Serial.printf("Expected sizes - weights: %d bytes, bias: %d bytes\n", weights_size, bias_size);
+
+        // Read weights
+        uint8_t* weights_buffer = (uint8_t*)malloc(weights_size);
+        if (!weights_buffer) {
+            Serial.printf("Failed to allocate %d bytes for weights in layer %s\n", weights_size, layerName);
+            file.close();
+            return false;
+        }
+
+        bytes_read = file.read(weights_buffer, weights_size);
+        if (bytes_read != weights_size) {
+            Serial.printf("Failed to read weights for layer %s. Expected %d bytes, got %d\n", 
+                        layerName, weights_size, bytes_read);
+            free(weights_buffer);
+            file.close();
+            return false;
+        }
+        currentPosition += weights_size;
+
+        // Debug: Print first few weights
+        float* weights_float = (float*)weights_buffer;
+        Serial.printf("First few weights: ");
+        for(int i = 0; i < min(5, (int)(weights_size/4)); i++) {
+            Serial.printf("%f ", weights_float[i]);
+        }
+        Serial.println();
+
+        // Read biases
+        uint8_t* bias_buffer = (uint8_t*)malloc(bias_size);
+        if (!bias_buffer) {
+            Serial.printf("Failed to allocate %d bytes for bias in layer %s\n", bias_size, layerName);
+            free(weights_buffer);
+            file.close();
+            return false;
+        }
+
+        bytes_read = file.read(bias_buffer, bias_size);
+        if (bytes_read != bias_size) {
+            Serial.printf("Failed to read bias for layer %s. Expected %d bytes, got %d\n", 
+                        layerName, bias_size, bytes_read);
+            free(weights_buffer);
+            free(bias_buffer);
+            file.close();
+            return false;
+        }
+        currentPosition += bias_size;
+
+        // Debug: Print first few biases
+        float* bias_float = (float*)bias_buffer;
+        Serial.printf("First few biases: ");
+        for(int i = 0; i < min(5, (int)(bias_size/4)); i++) {
+            Serial.printf("%f ", bias_float[i]);
+        }
+        Serial.println();
+
+        // Copy data to L1 matrices
+        memcpy(l1_weights.getData(), weights_buffer, weights_size);
+        memcpy(l1_bias.getData(), bias_buffer, bias_size);
+
+        free(weights_buffer);
+        free(bias_buffer);
+
+        // Read LayerNorm parameters for l1
+        size_t norm_size = rows * sizeof(float);
+        
+        // Read gamma
+        uint8_t* gamma_buffer = (uint8_t*)malloc(norm_size);
+        if (!gamma_buffer) {
+            Serial.printf("Failed to allocate memory for gamma in layer %s\n", layerName);
+            file.close();
+            return false;
+        }
+        
+        bytes_read = file.read(gamma_buffer, norm_size);
+        if (bytes_read != norm_size) {
+            Serial.printf("Failed to read gamma for layer %s. Expected %d bytes, got %d\n", 
+                        layerName, norm_size, bytes_read);
+            free(gamma_buffer);
+            file.close();
+            return false;
+        }
+
+        // Debug: Print first few gamma values
+        float* gamma_float = (float*)gamma_buffer;
+        Serial.printf("First few gamma values: ");
+        for(int i = 0; i < min(5, (int)(norm_size/4)); i++) {
+            Serial.printf("%f ", gamma_float[i]);
+        }
+        Serial.println();
+
+        memcpy(l1_norm.gamma.data(), gamma_buffer, norm_size);
+        free(gamma_buffer);
+        currentPosition += norm_size;
+
+        // Read beta
+        uint8_t* beta_buffer = (uint8_t*)malloc(norm_size);
+        if (!beta_buffer) {
+            Serial.printf("Failed to allocate memory for beta in layer %s\n", layerName);
+            file.close();
+            return false;
+        }
+        
+        bytes_read = file.read(beta_buffer, norm_size);
+        if (bytes_read != norm_size) {
+            Serial.printf("Failed to read beta for layer %s. Expected %d bytes, got %d\n", 
+                        layerName, norm_size, bytes_read);
+            free(beta_buffer);
+            file.close();
+            return false;
+        }
+
+        // Debug: Print first few beta values
+        float* beta_float = (float*)beta_buffer;
+        Serial.printf("First few beta values: ");
+        for(int i = 0; i < min(5, (int)(norm_size/4)); i++) {
+            Serial.printf("%f ", beta_float[i]);
+        }
+        Serial.println();
+
+        memcpy(l1_norm.beta.data(), beta_buffer, norm_size);
+        free(beta_buffer);
+        currentPosition += norm_size;
+
+        // Now read the second layer (output layer)
+        layerName = "l2";
+        
+        Serial.printf("\n=== Reading layer %s at position %d ===\n", layerName, currentPosition);
+        
+        // Read dimensions
+        bytes_read = file.read(dim_bytes, 8);
+        if (bytes_read != 8) {
+            Serial.printf("Failed to read dimensions bytes for layer %s. Expected 8, got %d\n", 
+                        layerName, bytes_read);
+            file.close();
+            return false;
+        }
+
+        // Convert bytes to dimensions
+        memcpy(&rows, dim_bytes, 4);
+        memcpy(&cols, dim_bytes + 4, 4);
+        currentPosition += 8;
+
+        Serial.printf("Layer %s dimensions decoded: %dx%d (at position %d)\n", 
+                    layerName, rows, cols, currentPosition);
+
+        // Sanity check dimensions
+        if (rows != 1 || cols != 10) {
+            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 1x10\n", layerName, rows, cols);
+            file.close();
+            return false;
+        }
+
+        // Calculate expected data sizes for output layer
+        weights_size = rows * cols * sizeof(float);
+        bias_size = rows * sizeof(float);
+        
+        // Read weights for output layer
+        weights_buffer = (uint8_t*)malloc(weights_size);
+        if (!weights_buffer) {
+            Serial.printf("Failed to allocate memory for weights in layer %s\n", layerName);
+            file.close();
+            return false;
+        }
+        
+        bytes_read = file.read(weights_buffer, weights_size);
+        if (bytes_read != weights_size) {
+            Serial.printf("Failed to read weights for layer %s. Expected %d bytes, got %d\n", 
+                        layerName, weights_size, bytes_read);
+            free(weights_buffer);
+            file.close();
+            return false;
+        }
+        currentPosition += weights_size;
+        
+        // Debug: Print first few weights
+        weights_float = (float*)weights_buffer;
+        Serial.printf("Output weights: ");
+        for(int i = 0; i < min(5, (int)(weights_size/4)); i++) {
+            Serial.printf("%f ", weights_float[i]);
+        }
+        Serial.println();
+        
+        // Read biases for output layer
+        bias_buffer = (uint8_t*)malloc(bias_size);
+        if (!bias_buffer) {
+            Serial.printf("Failed to allocate memory for bias in layer %s\n", layerName);
+            free(weights_buffer);
+            file.close();
+            return false;
+        }
+        
+        bytes_read = file.read(bias_buffer, bias_size);
+        if (bytes_read != bias_size) {
+            Serial.printf("Failed to read bias for layer %s. Expected %d bytes, got %d\n", 
+                        layerName, bias_size, bytes_read);
+            free(weights_buffer);
+            free(bias_buffer);
+            file.close();
+            return false;
+        }
+        currentPosition += bias_size;
+        
+        // Debug: Print output bias
+        bias_float = (float*)bias_buffer;
+        Serial.printf("Output bias: %f\n", bias_float[0]);
+        
+        // Copy data to L2 matrices (output layer)
+        memcpy(l2_weights.getData(), weights_buffer, weights_size);
+        memcpy(l2_bias.getData(), bias_buffer, bias_size);
+        
+        free(weights_buffer);
+        free(bias_buffer);
+
         file.close();
-        Serial.println("\nSuccessfully loaded all weights");
+        Serial.printf("\nSuccessfully loaded all weights. Total bytes read: %d\n", currentPosition);
         return true;
     }
 
@@ -303,24 +348,10 @@ public:
         layerNorm(h1, l1_norm);
         for (auto& val : h1) val = relu(val);
 
-        // Layer 2
-        std::vector<float> h2(l2_weights.getRows());
-        for (size_t i = 0; i < l2_weights.getRows(); i++) {
-            float sum = l2_bias(i, 0);
-            for (size_t j = 0; j < l2_weights.getCols(); j++) {
-                sum += l2_weights(i, j) * h1[j];
-            }
-            h2[i] = sum;
-        }
-
-        // Apply LayerNorm and ReLU to h2
-        layerNorm(h2, l2_norm);
-        for (auto& val : h2) val = relu(val);
-
-        // Output layer
-        float output = l3_bias(0, 0);
-        for (size_t j = 0; j < l3_weights.getCols(); j++) {
-            output += l3_weights(0, j) * h2[j];
+        // Output layer (direct from h1 to output)
+        float output = l2_bias(0, 0);
+        for (size_t j = 0; j < l2_weights.getCols(); j++) {
+            output += l2_weights(0, j) * h1[j];
         }
         
         // Apply tanh and scale by max_action
@@ -330,8 +361,7 @@ public:
 private:
     Matrix<float> l1_weights, l1_bias;
     Matrix<float> l2_weights, l2_bias;
-    Matrix<float> l3_weights, l3_bias;
-    LayerNormParams l1_norm, l2_norm;
+    LayerNormParams l1_norm;
     float max_action;
 
     void layerNorm(std::vector<float>& x, const LayerNormParams& params) {

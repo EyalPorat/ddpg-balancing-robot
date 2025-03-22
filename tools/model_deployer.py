@@ -11,7 +11,7 @@ import time
 import logging
 from typing import Dict, Any
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from python.src.balancing_robot.models import Actor
 
 logging.basicConfig(level=logging.INFO)
@@ -38,7 +38,7 @@ class ModelDeployer:
             bias = network.network[0].bias.data.cpu().numpy()
 
             # Write L1 shape
-            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 8x2 for updated state dim
+            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 10x2 for the new architecture
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
@@ -46,25 +46,16 @@ class ModelDeployer:
             f.write(network.network[1].weight.data.cpu().numpy().astype("float32").tobytes())
             f.write(network.network[1].bias.data.cpu().numpy().astype("float32").tobytes())
 
-            # Export layer 2
-            weights = network.network[3].weight.data.cpu().numpy()
-            bias = network.network[3].bias.data.cpu().numpy()
-
-            # Write L2 shape
-            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))
-            f.write(weights.astype("float32").tobytes())
-            f.write(bias.astype("float32").tobytes())
-            f.write(network.network[4].weight.data.cpu().numpy().astype("float32").tobytes())
-            f.write(network.network[4].bias.data.cpu().numpy().astype("float32").tobytes())
-
-            # Export layer 3 (output layer)
+            # Export output layer (L2 in the new architecture)
             weights = network.output_layer.weight.data.cpu().numpy()
             bias = network.output_layer.bias.data.cpu().numpy()
 
-            # Write L3 shape
+            # Write output layer shape
             f.write(struct.pack("II", weights.shape[0], weights.shape[1]))
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
+
+            logger.info(f"Weight file created with structure: L1(10x2) -> L2(1x10)")
 
     def verify_weights_file(self, filename: str) -> bool:
         """Verify exported weights file structure."""
@@ -74,30 +65,26 @@ class ModelDeployer:
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L1 shape: {rows}x{cols}")
 
-                # We expect 8x2 for the first layer
+                # We expect 10x2 for the first layer
                 if cols != 2:
-                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected Nx2")
+                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x2")
+                if rows != 10:
+                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x2")
 
                 # Skip weights and biases
                 f.seek(rows * cols * 4 + rows * 4, 1)  # float32 = 4 bytes
                 # Skip LayerNorm
                 f.seek(rows * 4 * 2, 1)
 
-                # Verify L2
+                # Verify L2 (output layer)
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L2 shape: {rows}x{cols}")
 
-                # Skip L2 data
-                f.seek(rows * cols * 4 + rows * 4, 1)
-                f.seek(rows * 4 * 2, 1)  # LayerNorm
-
-                # Verify L3
-                rows, cols = struct.unpack("II", f.read(8))
-                logger.info(f"L3 shape: {rows}x{cols}")
-
-                # Output layer should be 1xN (1 action output)
+                # Output layer should be 1x10
                 if rows != 1:
-                    raise ValueError(f"Invalid L3 shape: {rows}x{cols}, expected 1xN")
+                    raise ValueError(f"Invalid L2 shape: {rows}x{cols}, expected 1x10")
+                if cols != 10:
+                    raise ValueError(f"Invalid L2 shape: {rows}x{cols}, expected 1x10")
 
                 return True
 
@@ -147,10 +134,10 @@ def main():
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
-    # (theta, theta_dot)
-    actor = Actor(state_dim=2, action_dim=1, max_action=config["physics"]["max_torque"])
+    # Create model with new architecture (2x10x1)
+    actor = Actor(state_dim=2, action_dim=1, max_action=config["physics"]["max_torque"], hidden_dims=(10,))
 
-    checkpoint = torch.load(args.model, map_location=torch.device('cpu'))
+    checkpoint = torch.load(args.model, map_location=torch.device("cpu"))
     actor.load_state_dict(checkpoint["state_dict"])
 
     # Export and deploy

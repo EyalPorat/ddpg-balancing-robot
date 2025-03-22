@@ -32,7 +32,7 @@ public:
             Serial.println("Creating actor...");
             if (!actor) {
                 // (theta, theta_dot)
-                actor = new DDPGActor(2, 8, 1, max_action);
+                actor = new DDPGActor(2, 10, 1, max_action);
                 if (!actor) {
                     Serial.println("Failed to create actor");
                     return false;

@@ -527,7 +527,7 @@ void buildLogMessage(LogMessage &logMessage) {
     logMessage.timestamp = millis();
     logMessage.dt = clk;
     
-    logMessage.theta = varAng * DEG_TO_RAD;
+    logMessage.theta = varAngDDPG * DEG_TO_RAD;
     logMessage.theta_dot = varOmg * DEG_TO_RAD;
     
     logMessage.model_output = power;
