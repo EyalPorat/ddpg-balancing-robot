@@ -2,14 +2,14 @@
 
 # Model architecture
 model:
-  hidden_dims: [128, 128, 128]
+  hidden_dims: [32, 32, 32]
   dropout_rate: 0.25
   activation: "relu"
   layer_norm: true
 
 # Training data collection
 data_collection:
-  physics_samples: 2000000
+  physics_samples: 10000000
   real_samples: 10000
   noise_std: 0.1              # Action noise
   observation_noise_std: 0.01  # observation noise

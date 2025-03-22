@@ -58,8 +58,8 @@ class ModelAnalyzer:
         # Initialize model
         self.actor = self._load_model()
 
-        # self.simnet = SimNet(state_dim=2, action_dim=1, hidden_dims=(32, 32, 32))
-        self.simnet = SimNet(state_dim=2, action_dim=1, hidden_dims=(8, 8, 8))
+        self.simnet = SimNet(state_dim=2, action_dim=1, hidden_dims=(32, 32, 32))
+        # self.simnet = SimNet(state_dim=2, action_dim=1, hidden_dims=(8, 8, 8))
 
         self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/simnet_final.pt")["state_dict"])
 
