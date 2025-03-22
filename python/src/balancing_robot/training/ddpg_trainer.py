@@ -165,10 +165,10 @@ class DDPGTrainer:
         polyak_update(self.critic_target, self.critic, self.tau)
 
         return {
-            "critic_loss": critic_loss.item(),
-            "actor_loss": actor_loss.item(),
-            "q_value": current_Q.mean().item(),
-            "action_noise": self.action_noise * (self.noise_decay**self.training_steps),
+            "critic_loss": float(critic_loss.item()),
+            "actor_loss": float(actor_loss.item()),
+            "q_value": float(current_Q.mean().item()),
+            "action_noise": float(self.action_noise * (self.noise_decay**self.training_steps)),
         }
 
     def train(

@@ -30,7 +30,7 @@ observation:
 
 # Reward parameters
 reward:
-  reached_stable_bonus: 0.0
+  reached_stable_bonus: 50.0
   angle_weight: 1.0
   angular_velocity_weight: 0.001
   
