@@ -226,6 +226,10 @@ class SimNetTrainer:
         states = []
         actions = []
         next_states = []
+        dt_factors = []  # To store the time difference ratio
+
+        # Environment timestep (target)
+        env_dt = 0.01  # 100Hz - the timestep used in simulation and control
 
         # For each episode in the log_data
         for episode in log_data:
@@ -238,6 +242,20 @@ class SimNetTrainer:
                 # Extract next state
                 next_state = episode_states[i + 1]
 
+                # Calculate the real time difference between states
+                time_diff = (next_state["timestamp"] - current["timestamp"]) / 1000.0  # Convert ms to seconds
+                
+                # Skip invalid time differences (e.g., if there's a logging error causing negative time)
+                if time_diff <= 0:
+                    continue
+                    
+                # Calculate the ratio between real time difference and environment timestep
+                dt_factor = time_diff / env_dt
+                
+                # Skip if the time difference is too large (indicating potential gap in data)
+                if dt_factor > 10.0:  # Arbitrary threshold, adjust as needed
+                    continue
+
                 # Use only theta and theta_dot as our state
                 state = np.array([current["theta"], current["theta_dot"]])
                 next_state_array = np.array([next_state["theta"], next_state["theta_dot"]])
@@ -248,11 +266,30 @@ class SimNetTrainer:
                 states.append(state)
                 actions.append(action)
                 next_states.append(next_state_array)
+                dt_factors.append(dt_factor)
 
         # Convert to arrays
         states = np.array(states)
         actions = np.array(actions)
         next_states = np.array(next_states)
+        dt_factors = np.array(dt_factors)
+
+        # Adjust next_states based on dt_factors
+        if len(states) > 0:
+            # Calculate expected state change per environment timestep
+            state_changes = next_states - states
+            
+            # Scale down the state changes by the dt_factor to get consistent rate of change
+            adjusted_next_states = states + state_changes / dt_factors[:, np.newaxis]
+            
+            # Log statistics about time differences
+            print(f"Time difference statistics:")
+            print(f"  Average real dt: {np.mean(dt_factors * env_dt):.4f}s ({1.0/(np.mean(dt_factors * env_dt)):.1f}Hz)")
+            print(f"  Min dt factor: {np.min(dt_factors):.2f}, Max dt factor: {np.max(dt_factors):.2f}")
+            print(f"  Adjustment applied to {len(states)} state transitions")
+
+            # Update next_states with adjusted values
+            next_states = adjusted_next_states
 
         # Split into train/validation
         val_split = self.config["data_collection"]["validation_split"]
