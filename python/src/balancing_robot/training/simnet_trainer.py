@@ -244,14 +244,14 @@ class SimNetTrainer:
 
                 # Calculate the real time difference between states
                 time_diff = (next_state["timestamp"] - current["timestamp"]) / 1000.0  # Convert ms to seconds
-                
+
                 # Skip invalid time differences (e.g., if there's a logging error causing negative time)
                 if time_diff <= 0:
                     continue
-                    
+
                 # Calculate the ratio between real time difference and environment timestep
                 dt_factor = time_diff / env_dt
-                
+
                 # Skip if the time difference is too large (indicating potential gap in data)
                 if dt_factor > 10.0:  # Arbitrary threshold, adjust as needed
                     continue
@@ -278,13 +278,15 @@ class SimNetTrainer:
         if len(states) > 0:
             # Calculate expected state change per environment timestep
             state_changes = next_states - states
-            
+
             # Scale down the state changes by the dt_factor to get consistent rate of change
             adjusted_next_states = states + state_changes / dt_factors[:, np.newaxis]
-            
+
             # Log statistics about time differences
             print(f"Time difference statistics:")
-            print(f"  Average real dt: {np.mean(dt_factors * env_dt):.4f}s ({1.0/(np.mean(dt_factors * env_dt)):.1f}Hz)")
+            print(
+                f"  Average real dt: {np.mean(dt_factors * env_dt):.4f}s ({1.0/(np.mean(dt_factors * env_dt)):.1f}Hz)"
+            )
             print(f"  Min dt factor: {np.min(dt_factors):.2f}, Max dt factor: {np.max(dt_factors):.2f}")
             print(f"  Adjustment applied to {len(states)} state transitions")
 
@@ -421,6 +423,45 @@ class SimNetTrainer:
         }
 
         return balanced_data
+
+    @staticmethod
+    def clean_data_exceptions(
+        data: Dict[str, np.ndarray], std_threshold_multiplier: float = 3
+    ) -> Dict[str, np.ndarray]:
+        """Remove large standard deviation samples from data.
+
+        Args:
+            data: Dictionary containing training data
+            std_threshold_multiplier: Multiplier for standard deviation threshold
+
+        Returns:
+            Dictionary containing cleaned training data
+        """
+        states = data["states"]
+        actions = data["actions"]
+        next_states = data["next_states"]
+
+        # Calculate standard deviation of states
+        state_std = np.std(states, axis=0)
+        state_mean = np.mean(states, axis=0)
+        # Define threshold for outliers (e.g., std_threshold_multiplier standard deviations from the mean)
+        threshold = std_threshold_multiplier * state_std
+        # Identify outliers
+        outliers = np.any(np.abs(states - state_mean) > threshold, axis=1)
+        # Filter out outliers
+        cleaned_states = states[~outliers]
+
+        cleaned_actions = actions[~outliers]
+        cleaned_next_states = next_states[~outliers]
+
+        # Create cleaned data dictionary
+        cleaned_data = {
+            "states": cleaned_states,
+            "actions": cleaned_actions,
+            "next_states": cleaned_next_states,
+        }
+
+        return cleaned_data
 
     @staticmethod
     def prepare_weighted_batch_indices(data_size: int, batch_size: int, weights: np.ndarray) -> List[np.ndarray]:
