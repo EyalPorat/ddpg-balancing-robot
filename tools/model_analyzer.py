@@ -97,7 +97,8 @@ class ModelAnalyzer:
             hidden_dims = self.ddpg_config["model"]["actor"].get("hidden_dims", hidden_dims)
 
         # Get max action from environment config
-        max_action = self.env_config["physics"].get("max_torque", 0.23)
+        # max_action = self.env_config["physics"].get("max_torque", 0.23)
+        max_action = 1.0  # Default max action
 
         # Create actor model (2 inputs - theta, theta_dot)
         actor = Actor(state_dim=2, action_dim=1, max_action=max_action, hidden_dims=hidden_dims).to(self.device)
@@ -112,24 +113,27 @@ class ModelAnalyzer:
 
         return actor
 
-    def predict_actions(self, states):
+    def predict_actions(self, states, previous_actions):
         """Predict actions for given states."""
         with torch.no_grad():
             states_tensor = torch.FloatTensor(states).to(self.device)
-            actions = self.actor(states_tensor).cpu().numpy()
+            previous_actions_tensor = torch.FloatTensor(previous_actions).to(self.device)
+            actions = self.actor(states_tensor, previous_actions_tensor).cpu().numpy()
         return actions
 
     def analyze_response_curves(self):
         """Analyze controller response to varying state inputs."""
         print("Analyzing response curves...")
 
+        previous_actions = np.zeros((len(self.theta_range), 1))  # Placeholder for previous actions
+
         # Response to theta (with theta_dot = 0)
         theta_states = np.array([[theta, 0.0] for theta in self.theta_range])
-        theta_actions = self.predict_actions(theta_states)
+        theta_actions = self.predict_actions(theta_states, previous_actions)
 
         # Response to theta_dot (with theta = 0)
         theta_dot_states = np.array([[0.0, theta_dot] for theta_dot in self.theta_dot_range])
-        theta_dot_actions = self.predict_actions(theta_dot_states)
+        theta_dot_actions = self.predict_actions(theta_dot_states, previous_actions)
 
         # Plot theta response
         plt.figure(figsize=(10, 6))
@@ -164,9 +168,10 @@ class ModelAnalyzer:
         # Create meshgrid of states
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
         states = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten()))
+        previous_actions = np.zeros((len(states), 1))
 
         # Predict actions
-        actions = self.predict_actions(states)
+        actions = self.predict_actions(states, previous_actions)
         action_mesh = actions.reshape(theta_mesh.shape)
 
         # Plot heatmap
@@ -210,9 +215,10 @@ class ModelAnalyzer:
 
         # Prepare states for prediction
         states = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten()))
+        previous_actions = np.zeros((len(states), 1))  # Placeholder for previous actions
 
         # Predict actions
-        actions = self.predict_actions(states)
+        actions = self.predict_actions(states, previous_actions)
 
         # Calculate accelerations based on actions using physics model
         accelerations = []
@@ -267,9 +273,10 @@ class ModelAnalyzer:
         # Create meshgrid of states
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
         states = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten()))
+        previous_actions = np.zeros((len(states), 1))  # Placeholder for previous actions
 
         # Predict actions
-        actions = self.predict_actions(states)
+        actions = self.predict_actions(states, previous_actions)
         action_mesh = actions.reshape(theta_mesh.shape)
 
         # Create 3D plot
@@ -343,11 +350,13 @@ class ModelAnalyzer:
             for j, theta_dot in enumerate(theta_dots):
                 # Initialize state
                 state = np.array([theta, theta_dot])
+                previous_action = np.array([0.0])  # Placeholder for previous action
 
                 # Simulate trajectory
                 for step in range(max_steps):
                     # Get action
-                    action = self.predict_actions([state])[0]
+                    action = self.predict_actions(state.reshape(1, -1), previous_action.reshape(1, -1))[0]
+                    previous_action = np.array([action])
 
                     # Update state using physics model
                     accel = self.env.physics.get_acceleration(state, action)
@@ -427,9 +436,10 @@ class ModelAnalyzer:
 
         # Prepare states for prediction
         states = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten()))
+        previous_actions = np.zeros((len(states), 1))
 
         # Predict actions
-        actions = self.predict_actions(states)
+        actions = self.predict_actions(states, previous_actions)
         action_mesh = actions.reshape(theta_mesh.shape)
 
         # Calculate gradients
@@ -470,7 +480,8 @@ class ModelAnalyzer:
 
         for theta_dot in theta_dot_values:
             states = np.array([[theta, theta_dot] for theta in self.theta_range])
-            actions = self.predict_actions(states)
+            previous_actions = np.zeros((len(states), 1))
+            actions = self.predict_actions(states, previous_actions)
 
             plt.plot(self.theta_range * 180 / np.pi, actions, label=f"θ̇ = {theta_dot} rad/s")
 
@@ -492,7 +503,8 @@ class ModelAnalyzer:
 
         for theta, label in zip(theta_values, theta_labels):
             states = np.array([[theta, theta_dot] for theta_dot in self.theta_dot_range])
-            actions = self.predict_actions(states)
+            previous_actions = np.zeros((len(states), 1))
+            actions = self.predict_actions(states, previous_actions)
 
             plt.plot(self.theta_dot_range, actions, label=f"θ = {label}")
 
@@ -515,9 +527,10 @@ class ModelAnalyzer:
         # Create a dense grid around the balanced state
         balanced_theta = 0.0
         balanced_theta_dot = 0.0
+        balanced_action = np.array([0.0])  # Placeholder for balanced action
 
         # Compute action at balanced state
-        balanced_action = self.predict_actions(np.array([[balanced_theta, balanced_theta_dot]]))[0][
+        balanced_action = self.predict_actions(np.array([[balanced_theta, balanced_theta_dot]]), balanced_action.reshape(1, 1))[0][
             0
         ]  # Get scalar value
 
@@ -528,11 +541,13 @@ class ModelAnalyzer:
 
         # Compute actions for varying theta (with theta_dot = 0)
         theta_only_states = np.array([[theta, 0.0] for theta in thetas])
-        theta_only_actions = self.predict_actions(theta_only_states).flatten()  # Flatten to 1D array
+        previous_actions = np.zeros((len(theta_only_states), 1))  # Placeholder for previous actions
+        theta_only_actions = self.predict_actions(theta_only_states, previous_actions).flatten()  # Flatten to 1D array
 
         # Compute actions for varying theta_dot (with theta = 0)
         theta_dot_only_states = np.array([[0.0, theta_dot] for theta_dot in theta_dots])
-        theta_dot_only_actions = self.predict_actions(theta_dot_only_states).flatten()  # Flatten to 1D array
+        previous_actions = np.zeros((len(theta_dot_only_states), 1))  # Placeholder for previous actions
+        theta_dot_only_actions = self.predict_actions(theta_dot_only_states, previous_actions).flatten()  # Flatten to 1D array
 
         # Compute linear approximation coefficients (partial derivatives at origin)
         # Make sure to extract scalar values
@@ -572,9 +587,10 @@ class ModelAnalyzer:
         # Create 2D nonlinearity analysis
         theta_mesh, theta_dot_mesh = np.meshgrid(thetas, theta_dots)
         states = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten()))
+        previous_actions = np.zeros((len(states), 1))  # Placeholder for previous actions
 
         # Predict DDPG controller actions
-        actions = self.predict_actions(states)
+        actions = self.predict_actions(states, previous_actions)
         action_mesh = actions.reshape(theta_mesh.shape)
 
         # Create 2D linear approximation
@@ -640,11 +656,14 @@ class ModelAnalyzer:
             # Initialize trajectory
             trajectory = {"label": label, "states": [state.copy()], "actions": [], "time": [0.0]}
 
+            previous_action = np.zeros((1, 1))  # Placeholder for previous actions
+
             # Simulate
             current_time = 0.0
             for _ in range(max_steps):
                 # Get action
-                action = self.predict_actions([state])[0][0]
+                action = self.predict_actions([state], previous_action)[0][0]
+                previous_action = np.array([[action]])  # Update previous action
 
                 # Store action
                 trajectory["actions"].append(action)
@@ -767,9 +786,10 @@ class ModelAnalyzer:
         # Create state grid for comparison
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
         states = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten()))
+        previous_actions = np.zeros((len(states), 1))  # Placeholder for previous actions
 
         # Predict DDPG controller actions
-        ddpg_actions = self.predict_actions(states)
+        ddpg_actions = self.predict_actions(states, previous_actions)
         ddpg_action_mesh = ddpg_actions.reshape(theta_mesh.shape)
 
         # Calculate PD controller actions

@@ -32,7 +32,7 @@ public:
             Serial.println("Creating actor...");
             if (!actor) {
                 // (theta, theta_dot)
-                actor = new DDPGActor(2, 10, 1, max_action);
+                actor = new DDPGActor(3, 10, 1, max_action);
                 if (!actor) {
                     Serial.println("Failed to create actor");
                     return false;
@@ -109,11 +109,12 @@ public:
         }
     }
 
-    float getAction(float theta, float theta_dot) {
+    float getAction(float theta, float theta_dot, float previousAction) {
         if (!initialized || !actor) return 0.0f;
 
         state_buffer[0] = theta;
         state_buffer[1] = theta_dot;
+        state_buffer[2] = previousAction;
 
         return actor->forward(state_buffer);
     }

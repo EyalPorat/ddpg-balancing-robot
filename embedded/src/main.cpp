@@ -112,6 +112,7 @@ int16_t punchPwr = 20;
 int16_t punchDur = 1;
 int16_t punchPwr2;
 int16_t punchCountL = 0, punchCountR = 0;
+float previousAction = 0.0;
 
 // Global objects
 UdpLogger logger;
@@ -216,8 +217,11 @@ void drive() {
     if (demoMode == MODE_DDPG && ddpgController.isInitialized()) {
         float action = ddpgController.getAction(
             varAngDDPG * DEG_TO_RAD,  // Convert to radians
-            varOmg * DEG_TO_RAD   // Convert to radians
+            varOmg * DEG_TO_RAD,   // Convert to radians
+            previousAction
         );
+
+        previousAction = action / 127.0;
         
         action = constrain(action, -maxPwr, maxPwr);
         driveMotorL(action);
@@ -261,6 +265,7 @@ void resetVar() {
     varAng = varOmg = varDst = varSpd = varIang = 0.0;
     varAngDDPG = varAngPID = 0.0;
     lastComplementaryAngle = lastComplementaryAngleDDPG = initialAngle;
+    previousAction = 0.0;
 }
 
 void resetMotor() {
@@ -377,7 +382,7 @@ void setup() {
         delay(1000);
         
         Serial.println("Initializing DDPG controller...");
-        if (!ddpgController.init(maxPwr)) {
+        if (!ddpgController.init(127)) {
             Serial.println("DDPG initialization failed");
             M5.Lcd.setCursor(0, 110);
             M5.Lcd.print("DDPG Init Failed");

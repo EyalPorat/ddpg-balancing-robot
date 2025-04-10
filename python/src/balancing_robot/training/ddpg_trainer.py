@@ -114,11 +114,12 @@ class DDPGTrainer:
             },
         }
 
-    def select_action(self, state: np.ndarray, training: bool = True) -> np.ndarray:
+    def select_action(self, state: np.ndarray, current_action: np.array, training: bool = True) -> np.ndarray:
         """Select action using current policy."""
         with torch.no_grad():
+            current_action = torch.FloatTensor(current_action).unsqueeze(0).to(self.device)
             state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            action = self.actor(state).cpu().numpy().flatten()
+            action = self.actor(state, current_action).cpu().numpy().flatten()
 
             if training:
                 current_noise = max(self.action_noise * (self.noise_decay**self.training_steps), self.min_noise)
@@ -142,7 +143,7 @@ class DDPGTrainer:
         dones = torch.FloatTensor(dones).to(self.device)
 
         # Update critic
-        next_action = self.actor_target(next_states)
+        next_action = self.actor_target(next_states, actions)
         target_Q = self.critic_target(next_states, next_action)
         target_Q = rewards.unsqueeze(1) + (1 - dones.unsqueeze(1)) * self.gamma * target_Q
 
@@ -154,7 +155,9 @@ class DDPGTrainer:
         self.critic_optimizer.step()
 
         # Update actor
-        actor_loss = -self.critic(states, self.actor(states)).mean()
+        states_shifted = states[1:]  # Remove first state
+        actions_shifted = actions[:-1]  # Remove last action
+        actor_loss = -self.critic(states_shifted, self.actor(states_shifted, actions_shifted)).mean()
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
@@ -201,10 +204,12 @@ class DDPGTrainer:
         for episode in progress_bar:
             state, _ = self.env.reset()
             episode_reward = 0
+            previous_action = np.zeros(self.env.action_space.shape[0])
 
             for step in range(max_steps):
                 # Select and perform action
-                action = self.select_action(state)
+                action = self.select_action(state, previous_action)
+                previous_action = action.copy()
                 next_state, reward, done, _, info = self.env.step(action)
 
                 # Store transition
@@ -240,9 +245,15 @@ class DDPGTrainer:
                 # Save best model
                 if eval_reward > best_reward and log_dir:
                     best_reward = eval_reward
-                    save_model(self.actor, Path(log_dir) / "best_actor.pt", {"episode": int(episode), "reward": float(eval_reward)})
                     save_model(
-                        self.critic, Path(log_dir) / "best_critic.pt", {"episode": int(episode), "reward": float(eval_reward)}
+                        self.actor,
+                        Path(log_dir) / "best_actor.pt",
+                        {"episode": int(episode), "reward": float(eval_reward)},
+                    )
+                    save_model(
+                        self.critic,
+                        Path(log_dir) / "best_critic.pt",
+                        {"episode": int(episode), "reward": float(eval_reward)},
                     )
 
             # Regular saving
@@ -253,7 +264,7 @@ class DDPGTrainer:
         if logger:
             logger.save()
 
-        # Final model saving
+            # Final model saving
             if log_dir:
                 save_model(self.actor, Path(log_dir) / "actor_final.pt")
                 save_model(self.critic, Path(log_dir) / "critic_final.pt")
@@ -269,10 +280,12 @@ class DDPGTrainer:
             state, _ = self.env.reset()
             episode_reward = 0
             done = False
+            previous_action = np.zeros(self.env.action_space.shape[0])
 
             while not done and counter < max_steps:
                 counter += 1
-                action = self.select_action(state, training=False)
+                action = self.select_action(state, previous_action, training=False)
+                previous_action = action.copy()
                 state, reward, done, _, _ = self.env.step(action)
                 episode_reward += reward
 

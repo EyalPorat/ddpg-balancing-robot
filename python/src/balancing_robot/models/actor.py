@@ -22,7 +22,7 @@ class Actor(nn.Module):
 
         # Build network layers
         layers = []
-        prev_dim = state_dim
+        prev_dim = state_dim + action_dim
 
         for hidden_dim in hidden_dims:
             layers.extend([nn.Linear(prev_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.ReLU()])
@@ -41,14 +41,16 @@ class Actor(nn.Module):
             nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
             nn.init.constant_(m.bias, 0)
 
-    def forward(self, state: torch.Tensor) -> torch.Tensor:
+    def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """Forward pass through the network.
 
         Args:
             state: Input state tensor
+            action: Input action tensor
 
         Returns:
             Action tensor scaled by max_action
         """
-        x = self.network(state)
+        x = torch.cat([state, action], dim=1)
+        x = self.network(x)
         return self.max_action * torch.tanh(self.output_layer(x))
