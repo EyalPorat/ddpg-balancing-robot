@@ -249,9 +249,13 @@ class BalancerEnv(gym.Env):
         direction_reward = -np.sign(theta) * theta_dot
         
         # Time penalty for unstable steps
-        time_penalty = -0.5
+        # time_penalty = -0.5
+        time_penalty = 0
 
         termination_penalty = -20 if self._check_termination() else 0
+        
+        # Penalty for strong actions when angle is small
+        action_penalty = -5.0 * np.abs(self.action_space.sample()) if abs(np.rad2deg(theta)) < 5 else 0
 
         stable_reward = w["reached_stable_bonus"] if reached_stable else 0
 
@@ -259,10 +263,10 @@ class BalancerEnv(gym.Env):
             w["direction"] * max(0, direction_reward) +
             time_penalty +
             termination_penalty +
-            stable_reward
+            stable_reward +
+            action_penalty
         )
 
-        
         return float(reward)
 
     def _check_termination(self) -> bool:
