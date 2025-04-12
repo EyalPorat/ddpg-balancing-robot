@@ -86,7 +86,7 @@ class BalancerEnv(gym.Env):
                 "direction": 3.0,
                 "angular_velocity": 1.0,
                 "angle_decay": 30.0,
-                "reached_stable_bonus": 50.0
+                "reached_stable_bonus": 50.0,
             }
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
@@ -199,72 +199,78 @@ class BalancerEnv(gym.Env):
     #         reward += w["reached_stable_bonus"]
 
     #     return float(reward)
-    
+
     # def _compute_reward(self, reached_stable: bool) -> float:
     #     w = self.reward_weights
     #     theta = self.state[0]
     #     theta_dot = self.state[1]
-        
+
     #     # Time penalty for unstable steps
     #     time_penalty = -1 if not reached_stable else 0
 
     #     # More gradual angle reward
     #     angle_reward = 1.0 / (1.0 + w["angle_decay"] * theta**2)
-        
+
     #     # Directional component: reward corrective actions
     #     # Negative reward when angle and angular velocity have same sign
     #     # (robot is moving away from center)
     #     direction_reward = -np.sign(theta) * theta_dot
-        
+
     #     # Angular velocity penalty with a small deadzone
     #     vel_deadzone = 0.05  # Radians/sec
     #     angular_vel_penalty = -0.5 * max(0, abs(theta_dot) - vel_deadzone)**2
-        
+
     #     reward = (
     #         w["angle"] * angle_reward +
     #         w["direction"] * max(0, direction_reward) + # Only reward corrective motion
     #         w["angular_velocity"] * angular_vel_penalty +
     #         time_penalty  # Time penalty for unstable steps
     #     )
-        
+
     #     # Smoother termination penalty
     #     if self._check_termination():
     #         reward -= 20  # Less harsh
-        
+
     #     # Graduated stability bonus
     #     if abs(theta) < np.radians(5) and abs(theta_dot) < np.radians(5):
     #         stability_factor = 1.0 - (abs(theta) / np.radians(5) + abs(theta_dot) / np.radians(5)) / 2
     #         reward += w["reached_stable_bonus"] * stability_factor
-        
+
     #     return float(reward)
-    
+
     def _compute_reward(self, reached_stable: bool) -> float:
         w = self.reward_weights
         theta = self.state[0]
         theta_dot = self.state[1]
 
-        # Directional component: reward corrective actions
+        # Directional component:
+        # Reward corrective actions when angle and angular velocity have opposite signs
         # Negative reward when angle and angular velocity have same sign
         # (robot is moving away from center)
-        direction_reward = -np.sign(theta) * theta_dot
-        
+        direction_reward = 0
+        direction_penalty = 0
+        if np.sign(theta) != np.sign(theta_dot):
+            if abs(theta) > np.deg2rad(10):
+                direction_reward = -np.sign(theta) * theta_dot
+        else:
+            direction_penalty = np.sign(theta) * theta_dot
+            
+
+
         # Time penalty for unstable steps
         # time_penalty = -0.5
         time_penalty = 0
 
         termination_penalty = -20 if self._check_termination() else 0
-        
-        # Penalty for strong actions when angle is small
-        action_penalty = -5.0 * np.abs(self.action_space.sample()) if abs(np.rad2deg(theta)) < 5 else 0
 
         stable_reward = w["reached_stable_bonus"] if reached_stable else 0
 
         reward = (
-            w["direction"] * max(0, direction_reward) +
-            time_penalty +
-            termination_penalty +
-            stable_reward +
-            action_penalty
+            w["direction"] * direction_reward
+            + w["direction"] * direction_penalty
+            + time_penalty
+            + termination_penalty
+            + stable_reward
         )
 
         return float(reward)
