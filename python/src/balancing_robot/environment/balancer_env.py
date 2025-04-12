@@ -240,20 +240,28 @@ class BalancerEnv(gym.Env):
     
     def _compute_reward(self, reached_stable: bool) -> float:
         w = self.reward_weights
+        theta = self.state[0]
+        theta_dot = self.state[1]
 
-
-        reward = 0.0
+        # Directional component: reward corrective actions
+        # Negative reward when angle and angular velocity have same sign
+        # (robot is moving away from center)
+        direction_reward = -np.sign(theta) * theta_dot
         
         # Time penalty for unstable steps
         time_penalty = -0.5
-        reward += time_penalty
-        
-        # Smoother termination penalty
-        if self._check_termination():
-            reward -= 20  # Less harsh
 
-        if reached_stable:
-            reward += w["reached_stable_bonus"]
+        termination_penalty = -20 if self._check_termination() else 0
+
+        stable_reward = w["reached_stable_bonus"] if reached_stable else 0
+
+        reward = (
+            w["direction"] * max(0, direction_reward) +
+            time_penalty +
+            termination_penalty +
+            stable_reward
+        )
+
         
         return float(reward)
 
