@@ -79,6 +79,7 @@ class BalancerEnv(gym.Env):
                 "angular_velocity": reward_config["angular_velocity"],
                 "angle_decay": reward_config["angle_decay"],
                 "reached_stable_bonus": reward_config["reached_stable_bonus"],
+                "stillness": reward_config["stillness"],
             }
         else:
             self.reward_weights = {
@@ -87,6 +88,7 @@ class BalancerEnv(gym.Env):
                 "angular_velocity": 1.0,
                 "angle_decay": 30.0,
                 "reached_stable_bonus": 50.0,
+                "stillness": 5.0
             }
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
@@ -247,27 +249,25 @@ class BalancerEnv(gym.Env):
         # Reward corrective actions when angle and angular velocity have opposite signs
         # Negative reward when angle and angular velocity have same sign
         # (robot is moving away from center)
-        direction_reward = 0
-        direction_penalty = 0
-        if np.sign(theta) != np.sign(theta_dot):
-            direction_reward = -np.sign(theta) * theta_dot
-        else:
-            direction_penalty = -np.sign(theta) * theta_dot
-            
+        direction_component = -np.sign(theta) * theta_dot
 
-
-        # Time penalty for unstable steps
-        # time_penalty = -0.5
-        time_penalty = 0
+        # New stillness reward that activates near the balanced position
+        stillness_reward = 0
+        angle_threshold = np.rad2deg(3)  # Angle threshold for stillness reward
+        if abs(theta) < angle_threshold:
+            # Reward is highest when both angle and angular velocity are zero
+            # and decreases as either increases
+            angle_factor = 1.0 - (abs(theta) / angle_threshold)
+            velocity_factor = max(0, 1.0 - (abs(theta_dot) / 0.5))  # 0.5 rad/s threshold
+            stillness_reward = w["stillness"] * angle_factor * velocity_factor**2  # Square velocity term for stronger effect
 
         termination_penalty = -20 if self._check_termination() else 0
 
         stable_reward = w["reached_stable_bonus"] if reached_stable else 0
 
         reward = (
-            w["direction"] * direction_reward
-            + w["direction"] * direction_penalty
-            + time_penalty
+            w["direction"] * direction_component
+            + stillness_reward
             + termination_penalty
             + stable_reward
         )
