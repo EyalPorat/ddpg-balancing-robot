@@ -249,22 +249,31 @@ class DDPGTrainer:
 
             if logger:
                 logger.log({"episode_reward": episode_reward, "episode_length": step + 1})
+                progress_bar.set_postfix(
+                    {
+                        "episode": episode + 1,
+                        "reward": f"{episode_reward:.2f}",
+                        "actor_loss": logger.get_latest("actor_loss"),
+                        "critic_loss": logger.get_latest("critic_loss"),
+                    }
+                )
+            
+            # Save best model
+            if episode_reward > best_reward and log_dir:
+                best_reward = episode_reward
+                save_model(self.actor, Path(log_dir) / "best_actor.pt", {"episode": int(episode), "reward": float(episode_reward)})
+                save_model(
+                    self.critic, Path(log_dir) / "best_critic.pt", {"episode": int(episode), "reward": float(episode_reward)}
+                )
 
             # Evaluation
-            if (episode + 1) % eval_freq == 0:
-                eval_reward = self.evaluate()
-                if logger:
-                    logger.log({"eval_reward": eval_reward, "episode_length": step + 1})
+            # if (episode + 1) % eval_freq == 0:
+                # eval_reward = self.evaluate()
+                # if logger:
+                #     logger.log({"eval_reward": eval_reward, "episode_length": step + 1})
 
-                progress_bar.set_postfix({"episode": episode + 1, "eval_reward": f"{eval_reward:.2f}"})
+                # progress_bar.set_postfix({"episode": episode + 1, "eval_reward": f"{eval_reward:.2f}"})
 
-                # Save best model
-                if eval_reward > best_reward and log_dir:
-                    best_reward = eval_reward
-                    save_model(self.actor, Path(log_dir) / "best_actor.pt", {"episode": int(episode), "reward": float(eval_reward)})
-                    save_model(
-                        self.critic, Path(log_dir) / "best_critic.pt", {"episode": int(episode), "reward": float(eval_reward)}
-                    )
 
             # Regular saving
             if log_dir and (episode + 1) % save_freq == 0:
