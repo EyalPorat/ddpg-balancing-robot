@@ -219,9 +219,9 @@ class DDPGTrainer:
                     if logger:
                         logger.log(metrics)
 
-                # Stop episode if reached stable state
-                if info.get("reached_stable", False):
-                    break
+                # # Stop episode if reached stable state
+                # if info.get("reached_stable", False):
+                #     break
 
                 if done:
                     break
