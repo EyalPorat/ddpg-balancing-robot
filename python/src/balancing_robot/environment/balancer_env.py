@@ -205,6 +205,9 @@ class BalancerEnv(gym.Env):
         theta = self.state[0]
         theta_dot = self.state[1]
         
+        # Time penalty for unstable steps
+        time_penalty = -1 if not reached_stable else 0
+
         # More gradual angle reward
         angle_reward = 1.0 / (1.0 + w["angle_decay"] * theta**2)
         
@@ -220,7 +223,8 @@ class BalancerEnv(gym.Env):
         reward = (
             w["angle"] * angle_reward +
             w["direction"] * max(0, direction_reward) + # Only reward corrective motion
-            w["angular_velocity"] * angular_vel_penalty
+            w["angular_velocity"] * angular_vel_penalty +
+            time_penalty  # Time penalty for unstable steps
         )
         
         # Smoother termination penalty
