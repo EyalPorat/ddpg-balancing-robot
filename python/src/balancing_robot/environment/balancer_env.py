@@ -258,8 +258,7 @@ class BalancerEnv(gym.Env):
 
 
         # Time penalty for unstable steps
-        # time_penalty = -0.5
-        time_penalty = 0
+        time_penalty = -0.5
 
         termination_penalty = -20 if self._check_termination() else 0
 
