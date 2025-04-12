@@ -250,15 +250,15 @@ class BalancerEnv(gym.Env):
         direction_reward = 0
         direction_penalty = 0
         if np.sign(theta) != np.sign(theta_dot):
-            if abs(theta) > np.deg2rad(10):
-                direction_reward = -np.sign(theta) * theta_dot
+            direction_reward = -np.sign(theta) * theta_dot
         else:
-            direction_penalty = np.sign(theta) * theta_dot
+            direction_penalty = -np.sign(theta) * theta_dot
             
 
 
         # Time penalty for unstable steps
-        time_penalty = -0.5
+        # time_penalty = -0.5
+        time_penalty = 0
 
         termination_penalty = -20 if self._check_termination() else 0
 
