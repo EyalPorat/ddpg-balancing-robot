@@ -74,17 +74,19 @@ class BalancerEnv(gym.Env):
         if self.config:
             reward_config = self.config["reward"]
             self.reward_weights = {
-                "angle": reward_config["angle_weight"],
-                "angular_velocity": reward_config["angular_velocity_weight"],
+                "angle": reward_config["angle"],
+                "direction": reward_config["direction"],
+                "angular_velocity": reward_config["angular_velocity"],
                 "angle_decay": reward_config["angle_decay"],
                 "reached_stable_bonus": reward_config["reached_stable_bonus"],
             }
         else:
             self.reward_weights = {
-                "angle": 2.0,
-                "angular_velocity": 3.0,
-                "angle_decay": 10.0,
-                "reached_stable_bonus": 500.0,
+                "angle": 5.0,
+                "direction": 3.0,
+                "angular_velocity": 1.0,
+                "angle_decay": 30.0,
+                "reached_stable_bonus": 50.0
             }
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
@@ -175,27 +177,61 @@ class BalancerEnv(gym.Env):
 
         return self.state, reward, terminated, truncated, info
 
-    def _compute_reward(self, reached_stable: bool) -> float:
-        """Compute reward based on current state."""
-        w = self.reward_weights
+    # def _compute_reward(self, reached_stable: bool) -> float:
+    #     """Compute reward based on current state."""
+    #     w = self.reward_weights
 
+    #     theta = self.state[0]
+    #     theta_dot = self.state[1]
+
+    #     # Angle reward (exponential decay with angle)
+    #     angle_reward = np.exp(-w["angle_decay"] * theta**2)
+
+    #     # Angular velocity penalty
+    #     angular_vel_penalty = -0.5 * theta_dot**2
+
+    #     reward = w["angle"] * angle_reward + w["angular_velocity"] * angular_vel_penalty
+
+    #     if self._check_termination():
+    #         reward -= 200
+
+    #     if reached_stable:
+    #         reward += w["reached_stable_bonus"]
+
+    #     return float(reward)
+    
+    def _compute_reward(self, reached_stable: bool) -> float:
+        w = self.reward_weights
         theta = self.state[0]
         theta_dot = self.state[1]
-
-        # Angle reward (exponential decay with angle)
-        angle_reward = np.exp(-w["angle_decay"] * theta**2)
-
-        # Angular velocity penalty
-        angular_vel_penalty = -0.5 * theta_dot**2
-
-        reward = w["angle"] * angle_reward + w["angular_velocity"] * angular_vel_penalty
-
+        
+        # More gradual angle reward
+        angle_reward = 1.0 / (1.0 + w["angle_decay"] * theta**2)
+        
+        # Directional component: reward corrective actions
+        # Negative reward when angle and angular velocity have same sign
+        # (robot is moving away from center)
+        direction_reward = -np.sign(theta) * theta_dot
+        
+        # Angular velocity penalty with a small deadzone
+        vel_deadzone = 0.05  # Radians/sec
+        angular_vel_penalty = -0.5 * max(0, abs(theta_dot) - vel_deadzone)**2
+        
+        reward = (
+            w["angle"] * angle_reward +
+            w["direction"] * max(0, direction_reward) + # Only reward corrective motion
+            w["angular_velocity"] * angular_vel_penalty
+        )
+        
+        # Smoother termination penalty
         if self._check_termination():
-            reward -= 200
-
-        if reached_stable:
-            reward += w["reached_stable_bonus"]
-
+            reward -= 20  # Less harsh
+        
+        # Graduated stability bonus
+        if abs(theta) < np.radians(5) and abs(theta_dot) < np.radians(5):
+            stability_factor = 1.0 - (abs(theta) / np.radians(5) + abs(theta_dot) / np.radians(5)) / 2
+            reward += w["reached_stable_bonus"] * stability_factor
+        
         return float(reward)
 
     def _check_termination(self) -> bool:

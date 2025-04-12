@@ -105,8 +105,8 @@ public:
                     layerName, rows, cols, currentPosition);
 
         // Sanity check dimensions
-        if (rows != 10 || cols != 2) {
-            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 10x2\n", layerName, rows, cols);
+        if (rows != 4 || cols != 2) {
+            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 4x2\n", layerName, rows, cols);
             file.close();
             return false;
         }
@@ -261,8 +261,8 @@ public:
                     layerName, rows, cols, currentPosition);
 
         // Sanity check dimensions
-        if (rows != 1 || cols != 10) {
-            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 1x10\n", layerName, rows, cols);
+        if (rows != 1 || cols != 4) {
+            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 1x4\n", layerName, rows, cols);
             file.close();
             return false;
         }

@@ -38,7 +38,7 @@ class ModelDeployer:
             bias = network.network[0].bias.data.cpu().numpy()
 
             # Write L1 shape
-            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 10x2 for the new architecture
+            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 4x2 for the new architecture
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
@@ -55,7 +55,7 @@ class ModelDeployer:
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
-            logger.info(f"Weight file created with structure: L1(10x2) -> L2(1x10)")
+            logger.info(f"Weight file created with structure: L1(4x2) -> L2(1x4)")
 
     def verify_weights_file(self, filename: str) -> bool:
         """Verify exported weights file structure."""
@@ -65,11 +65,11 @@ class ModelDeployer:
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L1 shape: {rows}x{cols}")
 
-                # We expect 10x2 for the first layer
+                # We expect 4x2 for the first layer
                 if cols != 2:
-                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x2")
-                if rows != 10:
-                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x2")
+                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 4x2")
+                if rows != 4:
+                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 4x2")
 
                 # Skip weights and biases
                 f.seek(rows * cols * 4 + rows * 4, 1)  # float32 = 4 bytes
@@ -80,11 +80,11 @@ class ModelDeployer:
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L2 shape: {rows}x{cols}")
 
-                # Output layer should be 1x10
+                # Output layer should be 1x4
                 if rows != 1:
-                    raise ValueError(f"Invalid L2 shape: {rows}x{cols}, expected 1x10")
-                if cols != 10:
-                    raise ValueError(f"Invalid L2 shape: {rows}x{cols}, expected 1x10")
+                    raise ValueError(f"Invalid L2 shape: {rows}x{cols}, expected 1x4")
+                if cols != 4:
+                    raise ValueError(f"Invalid L2 shape: {rows}x{cols}, expected 1x4")
 
                 return True
 
@@ -134,8 +134,8 @@ def main():
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
-    # Create model with new architecture (2x10x1)
-    actor = Actor(state_dim=2, action_dim=1, max_action=config["physics"]["max_torque"], hidden_dims=(10,))
+    # Create model with new architecture (2x4x1)
+    actor = Actor(state_dim=2, action_dim=1, max_action=config["physics"]["max_torque"], hidden_dims=(4,))
 
     checkpoint = torch.load(args.model, map_location=torch.device("cpu"))
     actor.load_state_dict(checkpoint["state_dict"])
