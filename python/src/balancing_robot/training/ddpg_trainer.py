@@ -1,11 +1,12 @@
 import logging
 import yaml
 import torch
+import torch.nn.functional as F
 import numpy as np
 from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 
-from ..models import Actor, Critic, ReplayBuffer
+from ..models import Actor, Critic, ReplayBuffer, PrioritizedReplayBuffer
 from ..environment import BalancerEnv
 from .utils import polyak_update, TrainingLogger, save_model, load_model
 from tqdm import tqdm
@@ -77,7 +78,9 @@ class DDPGTrainer:
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=model_config["critic"]["learning_rate"])
 
         # Initialize replay buffer
-        self.replay_buffer = ReplayBuffer(train_config["buffer_size"])
+        # self.replay_buffer = ReplayBuffer(train_config["buffer_size"])
+        self.replay_buffer = PrioritizedReplayBuffer(train_config["buffer_size"], alpha=0.6)
+        self.prioritized_replay = True  # Flag to track which buffer we're using
 
         # Training parameters
         self.gamma = train_config["gamma"]
@@ -128,11 +131,14 @@ class DDPGTrainer:
         return action
 
     def train_step(self, batch_size: int) -> Dict[str, float]:
-        """Perform one training step."""
+        """Perform one training step with prioritized experience replay."""
         self.training_steps += 1
 
-        # Sample from replay buffer
-        states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
+        # Sample from prioritized replay buffer
+        states, actions, rewards, next_states, dones, weights, indices = self.replay_buffer.sample(
+            batch_size=batch_size,
+            beta=0.4 + 0.6 * min(self.training_steps / 50000, 1.0)  # Beta annealing from 0.4 to 1.0
+        )
 
         # Convert to tensors
         states = torch.FloatTensor(states).to(self.device)
@@ -140,15 +146,24 @@ class DDPGTrainer:
         rewards = torch.FloatTensor(rewards).to(self.device)
         next_states = torch.FloatTensor(next_states).to(self.device)
         dones = torch.FloatTensor(dones).to(self.device)
+        weights = torch.FloatTensor(weights).to(self.device)
 
         # Update critic
-        next_action = self.actor_target(next_states)
-        target_Q = self.critic_target(next_states, next_action)
-        target_Q = rewards.unsqueeze(1) + (1 - dones.unsqueeze(1)) * self.gamma * target_Q
+        with torch.no_grad():
+            next_action = self.actor_target(next_states)
+            target_Q = self.critic_target(next_states, next_action)
+            target_Q = rewards.unsqueeze(1) + (1 - dones.unsqueeze(1)) * self.gamma * target_Q
 
+        # Current Q-values
         current_Q = self.critic(states, actions)
-        critic_loss = torch.nn.functional.mse_loss(current_Q, target_Q.detach())
+        
+        # Calculate TD errors for priority updates
+        td_errors = torch.abs(current_Q - target_Q.detach())
+        
+        # Apply importance sampling weights to critic loss
+        critic_loss = (weights.unsqueeze(1) * F.mse_loss(current_Q, target_Q.detach(), reduction='none')).mean()
 
+        # Update critic
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
@@ -164,11 +179,17 @@ class DDPGTrainer:
         polyak_update(self.actor_target, self.actor, self.tau)
         polyak_update(self.critic_target, self.critic, self.tau)
 
+        # Update priorities in replay buffer
+        new_priorities = (td_errors.detach().cpu().numpy().squeeze() + 1e-6)  # small constant to ensure non-zero priority
+        self.replay_buffer.update_priorities(indices, new_priorities)
+
         return {
             "critic_loss": float(critic_loss.item()),
             "actor_loss": float(actor_loss.item()),
             "q_value": float(current_Q.mean().item()),
             "action_noise": float(self.action_noise * (self.noise_decay**self.training_steps)),
+            "mean_priority": float(np.mean(new_priorities)),
+            "max_priority": float(np.max(new_priorities)),
         }
 
     def train(
