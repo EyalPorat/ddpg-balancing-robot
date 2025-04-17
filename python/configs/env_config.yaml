@@ -43,6 +43,7 @@ reward:
   "angular_velocity": 1.0
   "angle_decay": 30.0
   "reached_stable_bonus": 50.0
+  "horizontal_velocity": 10.0
 
 # Episode termination
 termination:

@@ -80,6 +80,7 @@ class BalancerEnv(gym.Env):
                 "angle_decay": reward_config["angle_decay"],
                 "reached_stable_bonus": reward_config["reached_stable_bonus"],
                 "stillness": reward_config["stillness"],
+                "horizontal_velocity": reward_config["horizontal_velocity"],
             }
         else:
             self.reward_weights = {
@@ -88,7 +89,8 @@ class BalancerEnv(gym.Env):
                 "angular_velocity": 1.0,
                 "angle_decay": 30.0,
                 "reached_stable_bonus": 50.0,
-                "stillness": 5.0
+                "stillness": 5.0,
+                "horizontal_velocity": 10.0,
             }
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
@@ -113,6 +115,8 @@ class BalancerEnv(gym.Env):
                 np.deg2rad(theta_dot_deg),  # Convert theta_dot to radians per second
             ]
         )
+
+        self._initial_theta_sign = np.sign(self.state[0])
 
         self.steps = 0
 
@@ -159,7 +163,7 @@ class BalancerEnv(gym.Env):
         )
 
         # Calculate rewards
-        reward = self._compute_reward(reached_stable)
+        reward = self._compute_reward(reached_stable, initial_theta_sign=self._initial_theta_sign)
 
         # Check termination conditions
         terminated = self._check_termination()
@@ -240,10 +244,17 @@ class BalancerEnv(gym.Env):
 
     #     return float(reward)
 
-    def _compute_reward(self, reached_stable: bool) -> float:
+    def _compute_reward(self, reached_stable: bool, initial_theta_sign: bool = True) -> float:
         w = self.reward_weights
         theta = self.state[0]
         theta_dot = self.state[1]
+
+        # Horizontal velocity factor
+        initial_theta_sign_num = 1 if initial_theta_sign else -1
+        if np.sign(theta) == initial_theta_sign_num:
+            horizontal_velocity_factor = -abs(np.sin(theta))
+        else:
+            horizontal_velocity_factor = abs(np.sin(theta))
 
         # Directional component:
         # Reward corrective actions when angle and angular velocity have opposite signs
@@ -253,13 +264,13 @@ class BalancerEnv(gym.Env):
 
         # New stillness reward that activates near the balanced position
         stillness_reward = 0
-        angle_threshold = np.rad2deg(8)  # Angle threshold for stillness reward
-        if abs(theta) < angle_threshold:
-            # Reward is highest when both angle and angular velocity are zero
-            # and decreases as either increases
-            angle_factor = 1.0 - (abs(theta) / angle_threshold)
-            velocity_factor = max(0, 1.0 - (abs(theta_dot) / 0.5))  # 0.5 rad/s threshold
-            stillness_reward = w["stillness"] * angle_factor * velocity_factor**2  # Square velocity term for stronger effect
+        # angle_threshold = np.rad2deg(8)  # Angle threshold for stillness reward
+        # if abs(theta) < angle_threshold:
+        #     # Reward is highest when both angle and angular velocity are zero
+        #     # and decreases as either increases
+        #     angle_factor = 1.0 - (abs(theta) / angle_threshold)
+        #     velocity_factor = max(0, 1.0 - (abs(theta_dot) / 0.5))  # 0.5 rad/s threshold
+        #     stillness_reward = w["stillness"] * angle_factor * velocity_factor**2  # Square velocity term for stronger effect
 
         termination_penalty = -20 if self._check_termination() else 0
 
@@ -270,6 +281,7 @@ class BalancerEnv(gym.Env):
             + stillness_reward
             + termination_penalty
             + stable_reward
+            + horizontal_velocity_factor * w["horizontal_velocity"]
         )
 
         return float(reward)
