@@ -116,7 +116,7 @@ class BalancerEnv(gym.Env):
             ]
         )
 
-        self._initial_theta_sign = np.sign(self.state[0])
+        self._initial_theta_sign = True if np.sign(self.state[0]) > 0 else False
 
         self.steps = 0
 
