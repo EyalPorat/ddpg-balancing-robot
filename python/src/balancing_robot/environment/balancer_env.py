@@ -277,16 +277,18 @@ class BalancerEnv(gym.Env):
         # Reward corrective actions when angle and angular velocity have opposite signs
         # Negative reward when angle and angular velocity have same sign
         # (robot is moving away from center)
-        direction_component = -np.sign(theta) * theta_dot
+        # Scale theta_dot contribution exponentially based on angle magnitude
+        angle_scale = 1.0 - np.exp(-w["angle_decay"] * theta**2)
+        direction_component = -np.sign(theta) * theta_dot * angle_scale
 
         # New stillness reward that activates near the balanced position
         stillness_reward = 0
-        angle_threshold = np.rad2deg(3)  # Angle threshold for stillness reward
+        angle_threshold = np.rad2deg(5)  # Angle threshold for stillness reward
         if abs(theta) < angle_threshold:
             # Reward is highest when both angle and angular velocity are zero
             # and decreases as either increases
             angle_factor = 1.0 - (abs(theta) / angle_threshold)
-            velocity_factor = max(0, 1.0 - (abs(theta_dot) / 0.5))  # 0.5 rad/s threshold
+            velocity_factor = max(0, 1.0 - (abs(theta_dot) / 0.25))  # 0.5 rad/s threshold
             stillness_reward = (
                 w["stillness"] * angle_factor * velocity_factor**2
             )  # Square velocity term for stronger effect
