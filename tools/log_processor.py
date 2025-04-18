@@ -13,7 +13,7 @@ import logging
 import yaml
 from tqdm import tqdm
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from python.src.balancing_robot.models import SimNet
 
 logging.basicConfig(level=logging.INFO)
@@ -61,7 +61,16 @@ class Episode:
     @property
     def state_array(self) -> np.ndarray:
         """Convert states to numpy array format for training."""
-        return np.array([[s.theta, s.theta_dot] for s in self.states])
+        return np.array(
+            [
+                [
+                    s.theta,  # Angle
+                    s.theta_dot,  # Angular velocity
+                    s.motor_pwm / 127.0,  # Previous motor command (normalized to [-1, 1])
+                ]
+                for s in self.states
+            ]
+        )
 
     @property
     def action_array(self) -> np.ndarray:

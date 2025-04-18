@@ -11,6 +11,7 @@ public:
         actor = nullptr;
         receiver = nullptr;
         initialized = false;
+        prev_action = 0.0f;
     }
     
     ~DDPGController() {
@@ -31,8 +32,8 @@ public:
             // Initialize components one at a time with checks
             Serial.println("Creating actor...");
             if (!actor) {
-                // (theta, theta_dot)
-                actor = new DDPGActor(2, 10, 1, max_action);
+                // (theta, theta_dot, prev_action)
+                actor = new DDPGActor(3, 10, 1, max_action);
                 if (!actor) {
                     Serial.println("Failed to create actor");
                     return false;
@@ -50,7 +51,7 @@ public:
 
             Serial.println("Initializing state buffer...");
             try {
-                state_buffer.resize(2);
+                state_buffer.resize(3);
             } catch (const std::exception& e) {
                 Serial.println("Failed to resize state buffer");
                 return false;
@@ -114,8 +115,12 @@ public:
 
         state_buffer[0] = theta;
         state_buffer[1] = theta_dot;
+        state_buffer[2] = prev_action;
 
-        return actor->forward(state_buffer);
+        float action = actor->forward(state_buffer);
+        prev_action = action;
+        
+        return action;
     }
 
     bool isInitialized() const { return initialized; }
@@ -127,6 +132,7 @@ private:
     ModelReceiver* receiver;
     std::vector<float> state_buffer;
     bool initialized;
+    float prev_action;
 };
 
 #endif // DDPG_CONTROLLER_H

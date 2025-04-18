@@ -54,7 +54,9 @@ class DDPGTrainer:
         ).to(device)
 
         self.critic = Critic(
-            state_dim=state_dim, action_dim=action_dim, hidden_dims=model_config["critic"]["hidden_dims"]
+            state_dim=state_dim,
+            action_dim=action_dim,
+            hidden_dims=model_config["critic"]["hidden_dims"],
         ).to(device)
 
         # Create target networks
@@ -66,7 +68,9 @@ class DDPGTrainer:
         ).to(device)
 
         self.critic_target = Critic(
-            state_dim=state_dim, action_dim=action_dim, hidden_dims=model_config["critic"]["hidden_dims"]
+            state_dim=state_dim,
+            action_dim=action_dim,
+            hidden_dims=model_config["critic"]["hidden_dims"],
         ).to(device)
 
         # Copy weights
@@ -128,7 +132,7 @@ class DDPGTrainer:
                 noise = np.random.normal(0, current_noise, size=action.shape)
                 action = np.clip(action + noise, -1.0, 1.0)
 
-        return action
+            return action
 
     def train_step(self, batch_size: int) -> Dict[str, float]:
         """Perform one training step with prioritized experience replay."""
@@ -137,7 +141,7 @@ class DDPGTrainer:
         # Sample from prioritized replay buffer
         states, actions, rewards, next_states, dones, weights, indices = self.replay_buffer.sample(
             batch_size=batch_size,
-            beta=0.4 + 0.6 * min(self.training_steps / 50000, 1.0)  # Beta annealing from 0.4 to 1.0
+            beta=0.4 + 0.6 * min(self.training_steps / 50000, 1.0),  # Beta annealing from 0.4 to 1.0
         )
 
         # Convert to tensors
@@ -156,12 +160,12 @@ class DDPGTrainer:
 
         # Current Q-values
         current_Q = self.critic(states, actions)
-        
+
         # Calculate TD errors for priority updates
         td_errors = torch.abs(current_Q - target_Q.detach())
-        
+
         # Apply importance sampling weights to critic loss
-        critic_loss = (weights.unsqueeze(1) * F.mse_loss(current_Q, target_Q.detach(), reduction='none')).mean()
+        critic_loss = (weights.unsqueeze(1) * F.mse_loss(current_Q, target_Q.detach(), reduction="none")).mean()
 
         # Update critic
         self.critic_optimizer.zero_grad()
@@ -180,7 +184,7 @@ class DDPGTrainer:
         polyak_update(self.critic_target, self.critic, self.tau)
 
         # Update priorities in replay buffer
-        new_priorities = (td_errors.detach().cpu().numpy().squeeze() + 1e-6)  # small constant to ensure non-zero priority
+        new_priorities = td_errors.detach().cpu().numpy().squeeze() + 1e-6  # small constant to ensure non-zero priority
         self.replay_buffer.update_priorities(indices, new_priorities)
 
         return {
@@ -257,23 +261,28 @@ class DDPGTrainer:
                         "critic_loss": logger.get_latest("critic_loss"),
                     }
                 )
-            
+
             # Save best model
             if episode_reward > best_reward and log_dir:
                 best_reward = episode_reward
-                save_model(self.actor, Path(log_dir) / "best_actor.pt", {"episode": int(episode), "reward": float(episode_reward)})
                 save_model(
-                    self.critic, Path(log_dir) / "best_critic.pt", {"episode": int(episode), "reward": float(episode_reward)}
+                    self.actor,
+                    Path(log_dir) / "best_actor.pt",
+                    {"episode": int(episode), "reward": float(episode_reward)},
+                )
+                save_model(
+                    self.critic,
+                    Path(log_dir) / "best_critic.pt",
+                    {"episode": int(episode), "reward": float(episode_reward)},
                 )
 
             # Evaluation
             # if (episode + 1) % eval_freq == 0:
-                # eval_reward = self.evaluate()
-                # if logger:
-                #     logger.log({"eval_reward": eval_reward, "episode_length": step + 1})
+            # eval_reward = self.evaluate()
+            # if logger:
+            #     logger.log({"eval_reward": eval_reward, "episode_length": step + 1})
 
-                # progress_bar.set_postfix({"episode": episode + 1, "eval_reward": f"{eval_reward:.2f}"})
-
+            # progress_bar.set_postfix({"episode": episode + 1, "eval_reward": f"{eval_reward:.2f}"})
 
             # Regular saving
             if log_dir and (episode + 1) % save_freq == 0:
@@ -283,7 +292,7 @@ class DDPGTrainer:
         if logger:
             logger.save()
 
-        # Final model saving
+            # Final model saving
             if log_dir:
                 save_model(self.actor, Path(log_dir) / "actor_final.pt")
                 save_model(self.critic, Path(log_dir) / "critic_final.pt")

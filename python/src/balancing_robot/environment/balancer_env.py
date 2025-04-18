@@ -51,23 +51,31 @@ class BalancerEnv(gym.Env):
             self.max_torque = 0.23
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
 
-        # Define observation space - [theta, theta_dot]
+        # Define observation space - [theta, theta_dot, prev_motor_command]
         if self.config:
             obs_config = self.config["observation"]
             obs_high = np.array(
                 [
                     obs_config["angle_limit"],
                     obs_config["angular_velocity_limit"],
+                    1.0,  # Previous motor command is normalized to [-1, 1]
                 ]
             )
         else:
-            obs_high = np.array([np.pi / 2, 8.0])  # theta  # theta_dot
+            obs_high = np.array(
+                [
+                    np.pi / 2,  # theta
+                    8.0,  # theta_dot
+                    1.0,  # prev_motor_command
+                ]
+            )
 
         self.observation_space = spaces.Box(low=-obs_high, high=obs_high, dtype=np.float32)
 
         # Initialize state and render setup
         self.state = None
         self.steps = 0
+        self.prev_action = 0.0
         self.fig = None
         self.ax = None
 
@@ -88,7 +96,7 @@ class BalancerEnv(gym.Env):
                 "angular_velocity": 1.0,
                 "angle_decay": 30.0,
                 "reached_stable_bonus": 50.0,
-                "stillness": 5.0
+                "stillness": 5.0,
             }
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
@@ -111,9 +119,11 @@ class BalancerEnv(gym.Env):
             [
                 np.deg2rad(theta_deg),  # Convert theta to radians
                 np.deg2rad(theta_dot_deg),  # Convert theta_dot to radians per second
+                0.0,  # Initialize previous motor command to zero
             ]
         )
 
+        self.prev_action = 0.0
         self.steps = 0
 
         if self.render_mode == "human":
@@ -133,23 +143,40 @@ class BalancerEnv(gym.Env):
         # Scale action to actual torque
         torque = np.clip(action, -1.0, 1.0) * self.max_torque
 
+        # Extract theta and theta_dot for physics update
+        theta, theta_dot, _ = self.state
+
         # Calculate angular acceleration with physics engine
-        theta_ddot = self.physics.get_acceleration(self.state, torque)
+        theta_ddot = self.physics.get_acceleration(self.state[:2], torque)
 
         # Update state, with SimNet if available
         if self.simnet is None:
-            self.state = self.physics.integrate_state(self.state, theta_ddot)
+            # Create physics state with just the angle components
+            physics_state = np.array([theta, theta_dot])
+            new_state = self.physics.integrate_state(physics_state, theta_ddot)
+            # Combine with previous action
+            self.state = np.array(
+                [
+                    new_state[0],  # Updated theta
+                    new_state[1],  # Updated theta_dot
+                    action[0],  # Current action becomes previous action for next step
+                ]
+            )
         else:
             s_tensor = torch.tensor(self.state, dtype=torch.float32, device=self.device).unsqueeze(0)
             a_tensor = torch.tensor(action, dtype=torch.float32, device=self.device).unsqueeze(0)
             self.state = self.simnet(s_tensor, a_tensor).cpu().detach().numpy()[0]
+            self.state[2] = action[0]
 
         # Add noise to state
         if self.config:
             noise_std = self.config["observation"]["noise_std"]
-            self.state += self.np_random.normal(0, noise_std, size=self.state.shape)
+            # Add noise only to theta and theta_dot, not to the action
+            noise = self.np_random.normal(0, noise_std, size=2)
+            self.state[:2] += noise
 
         self.steps += 1
+        self.prev_action = action[0]  # Store current action for next step
 
         # Check if reached stable state
         min_angle_for_stable = np.deg2rad(3)
@@ -169,7 +196,8 @@ class BalancerEnv(gym.Env):
         info = {
             "state_of_interest": {
                 "angle": self.state[0],
-                "energy": self.physics.get_energy(self.state),
+                "energy": self.physics.get_energy(self.state[:2]),
+                "prev_motor_command": self.state[2],
             },
             "reached_stable": reached_stable,
         }
@@ -259,18 +287,15 @@ class BalancerEnv(gym.Env):
             # and decreases as either increases
             angle_factor = 1.0 - (abs(theta) / angle_threshold)
             velocity_factor = max(0, 1.0 - (abs(theta_dot) / 0.5))  # 0.5 rad/s threshold
-            stillness_reward = w["stillness"] * angle_factor * velocity_factor**2  # Square velocity term for stronger effect
+            stillness_reward = (
+                w["stillness"] * angle_factor * velocity_factor**2
+            )  # Square velocity term for stronger effect
 
         termination_penalty = -20 if self._check_termination() else 0
 
         stable_reward = w["reached_stable_bonus"] if reached_stable else 0
 
-        reward = (
-            w["direction"] * direction_component
-            + stillness_reward
-            + termination_penalty
-            + stable_reward
-        )
+        reward = w["direction"] * direction_component + stillness_reward + termination_penalty + stable_reward
 
         return float(reward)
 
@@ -305,6 +330,7 @@ class BalancerEnv(gym.Env):
 
         # Extract state
         theta = self.state[0]
+        prev_action = self.state[2]
 
         # Robot dimensions
         wheel_radius = self.physics.params.r
@@ -330,8 +356,8 @@ class BalancerEnv(gym.Env):
         self.ax.set_ylim(-0.1, 0.3)
         self.ax.set_aspect("equal")
 
-        # Add title with state information
-        self.ax.set_title(f"θ: {theta * 180/np.pi:.1f}°\n" f"Steps: {self.steps}")
+        # Add title with state information including previous motor command
+        self.ax.set_title(f"θ: {theta * 180/np.pi:.1f}°\n" f"Motor: {prev_action:.2f}\n" f"Steps: {self.steps}")
 
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()

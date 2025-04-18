@@ -152,7 +152,7 @@ class SimNetTrainer:
                 next_states.append(next_state.copy())
 
                 # break if angle is too large
-                if state[0] > np.pi / 2 or state[0] < -np.pi / 2:
+                if abs(state[0]) > np.pi / 2:
                     break
 
                 state = next_state
@@ -176,15 +176,15 @@ class SimNetTrainer:
 
                 next_state, _, done, _, _ = self.env.step(a_t)
 
-                # Add observation noise to next_state
-                next_state = next_state + np.random.normal(0, observation_noise_std, size=next_state.shape)
+                # Add observation noise to next_state (only to physical components)
+                next_state[:2] = next_state[:2] + np.random.normal(0, observation_noise_std, size=2)
 
                 states.append(s_t)
                 actions.append(a_t)
                 next_states.append(next_state.copy())
 
                 # break if angle is too large
-                if state[0] > np.pi / 2 or state[0] < -np.pi / 2:
+                if abs(state[0]) > np.pi / 2:
                     break
 
                 state = next_state
@@ -256,9 +256,14 @@ class SimNetTrainer:
                 if dt_factor > 10.0:  # Arbitrary threshold, adjust as needed
                     continue
 
-                # Use only theta and theta_dot as our state
-                state = np.array([current["theta"], current["theta_dot"]])
-                next_state_array = np.array([next_state["theta"], next_state["theta_dot"]])
+                # Use theta, theta_dot, and previous motor command (normalized to [-1, 1])
+                prev_motor_command = float(current["motor_pwm"]) / 127.0  # Normalize to [-1, 1]
+
+                state = np.array([current["theta"], current["theta_dot"], prev_motor_command])
+
+                next_motor_command = float(next_state["motor_pwm"]) / 127.0  # Normalize to [-1, 1]
+
+                next_state_array = np.array([next_state["theta"], next_state["theta_dot"], next_motor_command])
 
                 # Extract action and scale to [-1, 1]
                 action = np.array([current["motor_pwm"]]) / 127.0
@@ -280,7 +285,12 @@ class SimNetTrainer:
             state_changes = next_states - states
 
             # Scale down the state changes by the dt_factor to get consistent rate of change
-            adjusted_next_states = states + state_changes / dt_factors[:, np.newaxis]
+            # Only adjust the physical state components (theta, theta_dot), not the motor command
+            adjusted_next_states = np.copy(states)
+            adjusted_next_states[:, :2] += state_changes[:, :2] / dt_factors[:, np.newaxis]
+
+            # Keep the motor command update as is (it's not affected by dt)
+            adjusted_next_states[:, 2] = next_states[:, 2]
 
             # Log statistics about time differences
             print(f"Time difference statistics:")
@@ -327,12 +337,15 @@ class SimNetTrainer:
         Returns:
             Array of sample weights corresponding to each state
         """
+        # Only use the first two dimensions (theta and theta_dot) for binning
+        states_2d = states[:, :2]  # Extract just angle and angular velocity
+
         # Create discretizer for state binning
         discretizer = KBinsDiscretizer(n_bins=num_bins, encode="ordinal", strategy=strategy)
 
         # Fit on angle and angular velocity separately
-        angle_bins = discretizer.fit_transform(states[:, 0].reshape(-1, 1))
-        angular_vel_bins = discretizer.fit_transform(states[:, 1].reshape(-1, 1))
+        angle_bins = discretizer.fit_transform(states_2d[:, 0].reshape(-1, 1))
+        angular_vel_bins = discretizer.fit_transform(states_2d[:, 1].reshape(-1, 1))
 
         # Combine the bins to create a 2D grid of state space
         combined_bins = angle_bins * num_bins + angular_vel_bins

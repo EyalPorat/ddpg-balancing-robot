@@ -59,11 +59,11 @@ class DDPGActor {
 public:
     DDPGActor(size_t state_dim, size_t hidden_dim, size_t action_dim, float max_action)
         : l1_weights(hidden_dim, state_dim),
-          l1_bias(hidden_dim, 1),
-          l1_norm(hidden_dim),
-          l2_weights(action_dim, hidden_dim),
-          l2_bias(action_dim, 1),
-          max_action(max_action) {}
+            l1_bias(hidden_dim, 1),
+            l1_norm(hidden_dim),
+            l2_weights(action_dim, hidden_dim),
+            l2_bias(action_dim, 1),
+            max_action(max_action) {}
 
     bool loadWeights(const char* filename) {
         File file = SPIFFS.open(filename, FILE_READ);
@@ -105,8 +105,8 @@ public:
                     layerName, rows, cols, currentPosition);
 
         // Sanity check dimensions
-        if (rows != 10 || cols != 2) {
-            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 10x2\n", layerName, rows, cols);
+        if (rows != 10 || cols != 3) {
+            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 10x3\n", layerName, rows, cols);
             file.close();
             return false;
         }

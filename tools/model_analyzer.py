@@ -99,10 +99,10 @@ class ModelAnalyzer:
         # Get max action from environment config
         max_action = self.env_config["physics"].get("max_torque", 0.23)
 
-        # Create actor model (2 inputs - theta, theta_dot)
-        actor = Actor(state_dim=2, action_dim=1, max_action=max_action, hidden_dims=hidden_dims).to(self.device)
+        # Create actor model (3 inputs - theta, theta_dot, prev_motor_command)
+        actor = Actor(state_dim=3, action_dim=1, max_action=max_action, hidden_dims=hidden_dims).to(self.device)
 
-        print(f"Loading model with architecture: state_dim=2, action_dim=1, hidden_dims={hidden_dims}")
+        print(f"Loading model with architecture: state_dim=3, action_dim=1, hidden_dims={hidden_dims}")
         print(f"Max action from config: {max_action}")
 
         # Load weights
@@ -115,7 +115,15 @@ class ModelAnalyzer:
     def predict_actions(self, states):
         """Predict actions for given states."""
         with torch.no_grad():
-            states_tensor = torch.FloatTensor(states).to(self.device)
+            # Add dummy prev_motor_command (0.0) if the provided states are 2D
+            if states.shape[1] == 2:
+                # Add a column of zeros for prev_motor_command
+                prev_motor_command = np.zeros((states.shape[0], 1))
+                states_3d = np.concatenate([states, prev_motor_command], axis=1)
+            else:
+                states_3d = states
+                
+            states_tensor = torch.FloatTensor(states_3d).to(self.device)
             actions = self.actor(states_tensor).cpu().numpy()
         return actions
 
@@ -123,13 +131,18 @@ class ModelAnalyzer:
         """Analyze controller response to varying state inputs."""
         print("Analyzing response curves...")
 
-        # Response to theta (with theta_dot = 0)
-        theta_states = np.array([[theta, 0.0] for theta in self.theta_range])
+        # Response to theta (with theta_dot = 0 and prev_motor_command = 0)
+        theta_states = np.array([[theta, 0.0, 0.0] for theta in self.theta_range])
         theta_actions = self.predict_actions(theta_states)
 
-        # Response to theta_dot (with theta = 0)
-        theta_dot_states = np.array([[0.0, theta_dot] for theta_dot in self.theta_dot_range])
+        # Response to theta_dot (with theta = 0 and prev_motor_command = 0)
+        theta_dot_states = np.array([[0.0, theta_dot, 0.0] for theta_dot in self.theta_dot_range])
         theta_dot_actions = self.predict_actions(theta_dot_states)
+        
+        # Response to prev_motor_command (with theta = 0 and theta_dot = 0)
+        prev_cmd_range = np.linspace(-1.0, 1.0, 100)
+        prev_cmd_states = np.array([[0.0, 0.0, prev_cmd] for prev_cmd in prev_cmd_range])
+        prev_cmd_actions = self.predict_actions(prev_cmd_states)
 
         # Plot theta response
         plt.figure(figsize=(10, 6))
@@ -154,19 +167,37 @@ class ModelAnalyzer:
         plt.axvline(x=0, color="r", linestyle="--", alpha=0.3)
         plt.tight_layout()
         plt.savefig(self.output_dir / "theta_dot_response.png")
+        
+        # Plot prev_motor_command response
+        plt.figure(figsize=(10, 6))
+        plt.plot(prev_cmd_range, prev_cmd_actions)
+        plt.grid(True)
+        plt.xlabel("Previous Motor Command")
+        plt.ylabel("Action (torque)")
+        plt.title("Controller Response to Previous Motor Command")
+        plt.axhline(y=0, color="r", linestyle="--", alpha=0.3)
+        plt.axvline(x=0, color="r", linestyle="--", alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(self.output_dir / "prev_cmd_response.png")
 
         print("Response curves analyzed and saved.")
 
-    def create_action_heatmap(self):
-        """Create heatmap of actions across the state space."""
-        print("Creating action heatmap...")
+    def create_action_heatmap(self, prev_cmd=0.0):
+        """Create heatmap of actions across the state space for a fixed previous command value."""
+        print(f"Creating action heatmap (prev_cmd={prev_cmd})...")
 
         # Create meshgrid of states
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
-        states = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten()))
+        
+        # Create 3D states with fixed prev_cmd
+        states_3d = np.column_stack((
+            theta_mesh.flatten(), 
+            theta_dot_mesh.flatten(),
+            np.ones(theta_mesh.size) * prev_cmd  # Fixed previous command
+        ))
 
         # Predict actions
-        actions = self.predict_actions(states)
+        actions = self.predict_actions(states_3d)
         action_mesh = actions.reshape(theta_mesh.shape)
 
         # Plot heatmap
@@ -179,7 +210,7 @@ class ModelAnalyzer:
         plt.colorbar(heatmap, label="Action (torque)")
         plt.xlabel("Angle θ (degrees)")
         plt.ylabel("Angular Velocity θ̇ (rad/s)")
-        plt.title("Controller Action Map")
+        plt.title(f"Controller Action Map (prev_cmd={prev_cmd})")
 
         # Add contour lines
         contour = plt.contour(
@@ -197,9 +228,20 @@ class ModelAnalyzer:
         plt.axvline(x=0, color="k", linestyle="--", alpha=0.3)
         plt.grid(alpha=0.3)
         plt.tight_layout()
-        plt.savefig(self.output_dir / "action_heatmap.png", dpi=300)
+        plt.savefig(self.output_dir / f"action_heatmap_prev_cmd_{prev_cmd}.png", dpi=300)
 
         print("Action heatmap created and saved.")
+
+    def create_action_heatmaps_for_multiple_prev_cmds(self):
+        """Create action heatmaps for different previous command values."""
+        print("Creating multiple action heatmaps...")
+        
+        prev_cmd_values = [-1.0, -0.5, 0.0, 0.5, 1.0]
+        
+        for prev_cmd in prev_cmd_values:
+            self.create_action_heatmap(prev_cmd)
+        
+        print("All action heatmaps created.")
 
     def create_phase_space_plot(self):
         """Create phase space plot with velocity fields."""
@@ -859,7 +901,7 @@ class ModelAnalyzer:
     def run_complete_analysis(self):
         """Run all analysis methods."""
         self.analyze_response_curves()
-        self.create_action_heatmap()
+        self.create_action_heatmaps_for_multiple_prev_cmds()
         self.create_phase_space_plot()
         self.create_3d_action_surface()
         self.analyze_stability_regions()

@@ -134,8 +134,8 @@ def main():
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
-    # Create model with new architecture (2x10x1)
-    actor = Actor(state_dim=2, action_dim=1, max_action=config["physics"]["max_torque"], hidden_dims=(10,))
+    # Create model with 3D state input (includes prev_motor_command)
+    actor = Actor(state_dim=3, action_dim=1, max_action=config["physics"]["max_torque"], hidden_dims=(10,))
 
     checkpoint = torch.load(args.model, map_location=torch.device("cpu"))
     actor.load_state_dict(checkpoint["state_dict"])

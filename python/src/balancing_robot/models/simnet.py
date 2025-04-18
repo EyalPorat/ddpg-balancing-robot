@@ -61,7 +61,18 @@ class SimNet(nn.Module):
         """
         x = torch.cat([state, action], dim=1)
         x = self.hidden_layers(x)
-        return self.output_layer(x)
+        next_state = self.output_layer(x)
+
+        # The last element of the state is the previous action
+        # We need to replace it with the current action for the next step
+        if self.state_dim > 2:  # If we're using the expanded state space
+            # Create a copy of the predicted next state
+            next_state_with_action = next_state.clone()
+            # Replace the last element (prev_action) with the current action
+            next_state_with_action[:, -1] = action.squeeze()
+            return next_state_with_action
+
+        return next_state
 
     def update(self, states: torch.Tensor, actions: torch.Tensor, target_states: torch.Tensor) -> Dict[str, float]:
         """Update network weights using supervised learning.
@@ -77,8 +88,12 @@ class SimNet(nn.Module):
         # Get predictions
         pred_state = self(states, actions)
 
-        # Compute loss
-        loss = F.mse_loss(pred_state, target_states)
+        # Compute loss - only on the first two dimensions (angle, angular velocity)
+        # The third dimension (previous action) is determined by the current action
+        if self.state_dim > 2:
+            loss = F.mse_loss(pred_state[:, :2], target_states[:, :2])
+        else:
+            loss = F.mse_loss(pred_state, target_states)
 
         # Optimize
         self.optimizer.zero_grad()
