@@ -12,6 +12,7 @@ public:
         receiver = nullptr;
         initialized = false;
         prev_action = 0.0f;
+        max_action = 0.0f;
     }
     
     ~DDPGController() {
@@ -23,6 +24,8 @@ public:
         try {
             Serial.println("Starting DDPG init...");
             
+            this->max_action = max_action;
+
             // Use PSRAM if available
             if (psramFound()) {
                 Serial.println("PSRAM found");
@@ -112,13 +115,13 @@ public:
 
     float getAction(float theta, float theta_dot) {
         if (!initialized || !actor) return 0.0f;
-
+    
         state_buffer[0] = theta;
         state_buffer[1] = theta_dot;
         state_buffer[2] = prev_action;
-
+    
         float action = actor->forward(state_buffer);
-        prev_action = action;
+        prev_action = action / max_action;
         
         return action;
     }
@@ -133,6 +136,7 @@ private:
     std::vector<float> state_buffer;
     bool initialized;
     float prev_action;
+    float max_action;
 };
 
 #endif // DDPG_CONTROLLER_H
