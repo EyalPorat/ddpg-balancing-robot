@@ -293,7 +293,8 @@ class BalancerEnv(gym.Env):
 
         termination_penalty = -20 if self._check_termination() else 0
 
-        stable_reward = w["reached_stable_bonus"] if reached_stable else 0
+        # stable_reward = w["reached_stable_bonus"] if reached_stable else 0
+        stable_reward = 0
 
         reward = w["direction"] * direction_component + stillness_reward + termination_penalty + stable_reward
 
