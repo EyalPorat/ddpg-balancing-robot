@@ -39,7 +39,7 @@ reward:
 
   "angle": 5.0
   "direction": 5.0
-  "stillness": 0.0
+  "stillness": 1.0
   "angular_velocity": 1.0
   "angle_decay": 30.0
   "reached_stable_bonus": 50.0
