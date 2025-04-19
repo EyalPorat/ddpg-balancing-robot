@@ -21,7 +21,7 @@ def main():
         "--type",
         type=str,
         default="all",
-        choices=["all", "basic", "performance", "comparison"],
+        choices=["all", "basic", "performance", "comparison", "trajectory"],
         help="Type of analysis to run",
     )
     parser.add_argument("--device", type=str, default="cpu", help="Device to run on (cpu/cuda)")
@@ -60,6 +60,9 @@ def main():
     elif args.type == "comparison":
         analyzer.generate_comparative_pd_controller()
         analyzer.analyze_controller_nonlinearity()
+    elif args.type == "trajectory":
+        analyzer.analyze_simulated_trajectories()
+
 
     print(f"Analysis complete. Results saved to {args.output}")
     print(f"Open {output_dir / 'analysis_summary.html'} in a browser to view results")

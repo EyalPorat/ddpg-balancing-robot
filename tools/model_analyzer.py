@@ -708,14 +708,39 @@ class ModelAnalyzer:
 
         # Define different initial conditions for simulation
         initial_conditions = [
-            # (theta, theta_dot, label)
-            (np.pi / 12, 0.0, "Small angle (15°)"),
-            (np.pi / 6, 0.0, "Medium angle (30°)"),
-            (np.pi / 4, 0.0, "Large angle (45°)"),
-            (0.0, 1.0, "Small angular velocity"),
-            (0.0, 2.0, "Medium angular velocity"),
-            (np.pi / 12, 1.0, "Combined state"),
-            (-np.pi / 12, -1.0, "Negative state"),
+            # Starting positions with zero velocity
+            (np.pi / 12, 0.0, "Small angle +15°"),
+            (np.pi / 6, 0.0, "Medium angle +30°"),
+            (np.pi / 4, 0.0, "Large angle +45°"),
+            (-np.pi / 12, 0.0, "Small angle -15°"),
+            (-np.pi / 6, 0.0, "Medium angle -30°"),
+            (-np.pi / 4, 0.0, "Large angle -45°"),
+            # Pure angular velocities
+            (0.0, 1.0, "Small velocity +1 rad/s"),
+            (0.0, 2.0, "Medium velocity +2 rad/s"),
+            (0.0, 4.0, "Large velocity +4 rad/s"),
+            (0.0, -1.0, "Small velocity -1 rad/s"),
+            (0.0, -2.0, "Medium velocity -2 rad/s"),
+            (0.0, -4.0, "Large velocity -4 rad/s"),
+            # Combined states - same signs
+            (np.pi / 12, 1.0, "Small +angle +velocity"),
+            (np.pi / 6, 2.0, "Medium +angle +velocity"),
+            (-np.pi / 12, -1.0, "Small -angle -velocity"),
+            (-np.pi / 6, -2.0, "Medium -angle -velocity"),
+            # Combined states - opposite signs
+            (np.pi / 12, -1.0, "Small +angle -velocity"),
+            (np.pi / 6, -2.0, "Medium +angle -velocity"),
+            (-np.pi / 12, 1.0, "Small -angle +velocity"),
+            (-np.pi / 6, 2.0, "Medium -angle +velocity"),
+            # Extreme edge cases
+            (np.pi / 3, 3.0, "Extreme +angle +velocity"),
+            (-np.pi / 3, -3.0, "Extreme -angle -velocity"),
+            (np.pi / 3, -3.0, "Extreme +angle -velocity"),
+            (-np.pi / 3, 3.0, "Extreme -angle +velocity"),
+            # Near balanced states
+            (np.pi / 36, 0.1, "Near balanced +angle"),
+            (-np.pi / 36, -0.1, "Near balanced -angle"),
+            (np.pi / 72, 0.05, "Very near balanced"),
         ]
 
         # Simulation parameters
@@ -774,7 +799,7 @@ class ModelAnalyzer:
         plt.xlabel("Time (s)")
         plt.ylabel("Angle θ (degrees)")
         plt.title("Simulated Angle Trajectories")
-        plt.legend()
+        plt.legend(loc="upper right")
         plt.tight_layout()
         plt.savefig(self.output_dir / "angle_trajectories.png")
 
@@ -788,7 +813,7 @@ class ModelAnalyzer:
         plt.xlabel("Time (s)")
         plt.ylabel("Angular Velocity θ̇ (rad/s)")
         plt.title("Simulated Angular Velocity Trajectories")
-        plt.legend()
+        plt.legend(loc="upper right")
         plt.tight_layout()
         plt.savefig(self.output_dir / "angular_velocity_trajectories.png")
 
@@ -806,7 +831,7 @@ class ModelAnalyzer:
         plt.xlabel("Time (s)")
         plt.ylabel("Action (torque)")
         plt.title("Controller Actions")
-        plt.legend()
+        plt.legend(loc="upper right")
         plt.tight_layout()
         plt.savefig(self.output_dir / "action_trajectories.png")
 
@@ -834,7 +859,7 @@ class ModelAnalyzer:
         plt.xlabel("Angle θ (degrees)")
         plt.ylabel("Angular Velocity θ̇ (rad/s)")
         plt.title("Phase Portrait")
-        plt.legend()
+        plt.legend(loc="upper right")
         plt.axhline(y=0, color="k", linestyle="--", alpha=0.3)
         plt.axvline(x=0, color="k", linestyle="--", alpha=0.3)
         plt.tight_layout()
