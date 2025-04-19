@@ -86,9 +86,9 @@ class DDPGTrainer:
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=model_config["critic"]["learning_rate"])
 
         # Initialize replay buffer
-        # self.replay_buffer = ReplayBuffer(train_config["buffer_size"])
-        self.replay_buffer = PrioritizedReplayBuffer(train_config["buffer_size"], alpha=0.6)
-        self.prioritized_replay = True  # Flag to track which buffer we're using
+        self.replay_buffer = ReplayBuffer(train_config["buffer_size"])
+        # self.replay_buffer = PrioritizedReplayBuffer(train_config["buffer_size"], alpha=0.6)
+        self.prioritized_replay = False  # Flag to track which buffer we're using
 
         # Training parameters
         self.gamma = train_config["gamma"]
@@ -142,11 +142,15 @@ class DDPGTrainer:
         """Perform one training step with prioritized experience replay."""
         self.training_steps += 1
 
-        # Sample from prioritized replay buffer
-        states, actions, rewards, next_states, dones, weights, indices = self.replay_buffer.sample(
-            batch_size=batch_size,
-            beta=0.4 + 0.6 * min(self.training_steps / 50000, 1.0),  # Beta annealing from 0.4 to 1.0
-        )
+        if self.prioritized_replay:
+            # Sample from prioritized replay buffer
+            states, actions, rewards, next_states, dones, weights, indices = self.replay_buffer.sample(
+                batch_size=batch_size,
+                beta=0.4 + 0.6 * min(self.training_steps / 50000, 1.0),  # Beta annealing from 0.4 to 1.0
+            )
+        else:
+            # Sample from normal replay buffer
+            states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size=batch_size)
 
         # Convert to tensors
         states = torch.FloatTensor(states).to(self.device)
@@ -154,7 +158,8 @@ class DDPGTrainer:
         rewards = torch.FloatTensor(rewards).to(self.device)
         next_states = torch.FloatTensor(next_states).to(self.device)
         dones = torch.FloatTensor(dones).to(self.device)
-        weights = torch.FloatTensor(weights).to(self.device)
+        if self.prioritized_replay:
+            weights = torch.FloatTensor(weights).to(self.device)
 
         # Update critic
         with torch.no_grad():
@@ -168,8 +173,11 @@ class DDPGTrainer:
         # Calculate TD errors for priority updates
         td_errors = torch.abs(current_Q - target_Q.detach())
 
-        # Apply importance sampling weights to critic loss
-        critic_loss = (weights.unsqueeze(1) * F.mse_loss(current_Q, target_Q.detach(), reduction="none")).mean()
+        if self.prioritized_replay:
+            # Apply importance sampling weights to critic loss
+            critic_loss = (weights.unsqueeze(1) * F.mse_loss(current_Q, target_Q.detach(), reduction="none")).mean()
+        else:
+            critic_loss = F.mse_loss(current_Q, target_Q.detach())
 
         # Update critic
         self.critic_optimizer.zero_grad()
@@ -187,18 +195,27 @@ class DDPGTrainer:
         polyak_update(self.actor_target, self.actor, self.tau)
         polyak_update(self.critic_target, self.critic, self.tau)
 
-        # Update priorities in replay buffer
-        new_priorities = td_errors.detach().cpu().numpy().squeeze() + 1e-6  # small constant to ensure non-zero priority
-        self.replay_buffer.update_priorities(indices, new_priorities)
+        if self.prioritized_replay:
+            # Update priorities in replay buffer
+            new_priorities = (
+                td_errors.detach().cpu().numpy().squeeze() + 1e-6
+            )  # small constant to ensure non-zero priority
+            self.replay_buffer.update_priorities(indices, new_priorities)
 
-        return {
+        metrics = {
             "critic_loss": float(critic_loss.item()),
             "actor_loss": float(actor_loss.item()),
             "q_value": float(current_Q.mean().item()),
             "action_noise": float(self.action_noise * (self.noise_decay**self.training_steps)),
+        }
+        
+        if self.prioritized_replay:
+            metrics.update({
             "mean_priority": float(np.mean(new_priorities)),
             "max_priority": float(np.max(new_priorities)),
-        }
+            })
+            
+        return metrics
 
     def train(
         self,
