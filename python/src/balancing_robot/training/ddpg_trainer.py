@@ -86,9 +86,9 @@ class DDPGTrainer:
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=model_config["critic"]["learning_rate"])
 
         # Initialize replay buffer
-        self.replay_buffer = ReplayBuffer(train_config["buffer_size"])
-        # self.replay_buffer = PrioritizedReplayBuffer(train_config["buffer_size"], alpha=0.6)
-        self.prioritized_replay = False  # Flag to track which buffer we're using
+        # self.replay_buffer = ReplayBuffer(train_config["buffer_size"])
+        self.replay_buffer = PrioritizedReplayBuffer(train_config["buffer_size"], alpha=0.6)
+        self.prioritized_replay = True  # Flag to track which buffer we're using
 
         # Training parameters
         self.gamma = train_config["gamma"]

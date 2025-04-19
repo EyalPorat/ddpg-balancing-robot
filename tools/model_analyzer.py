@@ -419,7 +419,8 @@ class ModelAnalyzer:
 
         # Simulation parameters
         max_steps = 500
-        stable_threshold = 0.1  # radians and rad/s
+        stable_threshold_theta = np.deg2rad(6)
+        stable_threshold_theta_dot = np.deg2rad(6)
 
         # Simulate trajectories from each initial condition
         for i, theta in enumerate(tqdm(thetas, desc="Simulating trajectories")):
@@ -436,7 +437,7 @@ class ModelAnalyzer:
                     next_state = self.predict_next_state_simnet(state, action)
 
                     # Check if balanced
-                    if abs(next_state[0]) < stable_threshold and abs(next_state[1]) < stable_threshold:
+                    if abs(next_state[0]) < stable_threshold_theta and abs(next_state[1]) < stable_threshold_theta_dot:
                         stability_grid[i, j] = 1
                         steps_to_stabilize[i, j] = step
                         break
