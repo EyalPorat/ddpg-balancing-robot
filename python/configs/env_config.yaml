@@ -14,7 +14,7 @@ physics:
   
   # Motor parameters
   max_torque: 0.23       # N⋅m
-  max_delta: 0.2         # Max change in motor command (as fraction of max_torque)
+  max_delta: 0.25         # Max change in motor command (as fraction of max_torque)
   motor_deadzone: 0.04   # N⋅m
   static_friction: 0.7   # coefficient
   
@@ -39,8 +39,8 @@ reward:
   # angle_decay: 15.0
 
   "angle": 5.0
-  "direction": 5.0
-  "stillness": 50.0
+  "direction": 7.5
+  "stillness": 69.0
   "angular_velocity": 1.0
   "angle_decay": 30.0
   "reached_stable_bonus": 0.0

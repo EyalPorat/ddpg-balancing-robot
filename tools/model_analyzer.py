@@ -420,7 +420,7 @@ class ModelAnalyzer:
         # Simulation parameters
         max_steps = 500
         stable_threshold_theta = np.deg2rad(6)
-        stable_threshold_theta_dot = np.deg2rad(6)
+        stable_threshold_theta_dot = np.deg2rad(30)
 
         # Simulate trajectories from each initial condition
         for i, theta in enumerate(tqdm(thetas, desc="Simulating trajectories")):
