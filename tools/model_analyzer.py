@@ -58,10 +58,11 @@ class ModelAnalyzer:
         # Initialize model
         self.actor = self._load_model()
 
+        # Initialize and load SimNet
         self.simnet = SimNet(state_dim=3, action_dim=1, hidden_dims=(32, 32, 32))
-        # self.simnet = SimNet(state_dim=3, action_dim=1, hidden_dims=(8, 8, 8))
-
         self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/simnet_final.pt")["state_dict"])
+        self.simnet.to(device)
+        self.simnet.eval()  # Set to evaluation mode
 
         # Load environment for reference values
         self.env = BalancerEnv(config_path=env_config_path, simnet=self.simnet)
@@ -123,10 +124,30 @@ class ModelAnalyzer:
                 states_3d = np.concatenate([states, prev_motor_command], axis=1)
             else:
                 states_3d = states
-                
+
             states_tensor = torch.FloatTensor(states_3d).to(self.device)
             actions = self.actor(states_tensor).cpu().numpy()
         return actions
+
+    def predict_next_state_simnet(self, state, action):
+        """Predict next state using SimNet.
+
+        Args:
+            state: Current state array [theta, theta_dot, prev_action]
+            action: Action array
+
+        Returns:
+            Next state array [theta, theta_dot, action]
+        """
+        with torch.no_grad():
+            # Convert to tensors
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+            action_tensor = torch.FloatTensor(action).unsqueeze(0).to(self.device)
+
+            # Predict next state
+            next_state = self.simnet(state_tensor, action_tensor).squeeze(0).cpu().numpy()
+
+        return next_state
 
     def analyze_response_curves(self):
         """Analyze controller response to varying state inputs."""
@@ -139,7 +160,7 @@ class ModelAnalyzer:
         # Response to theta_dot (with theta = 0 and prev_motor_command = 0)
         theta_dot_states = np.array([[0.0, theta_dot, 0.0] for theta_dot in self.theta_dot_range])
         theta_dot_actions = self.predict_actions(theta_dot_states)
-        
+
         # Response to prev_motor_command (with theta = 0 and theta_dot = 0)
         prev_cmd_range = np.linspace(-1.0, 1.0, 100)
         prev_cmd_states = np.array([[0.0, 0.0, prev_cmd] for prev_cmd in prev_cmd_range])
@@ -168,7 +189,7 @@ class ModelAnalyzer:
         plt.axvline(x=0, color="r", linestyle="--", alpha=0.3)
         plt.tight_layout()
         plt.savefig(self.output_dir / "theta_dot_response.png")
-        
+
         # Plot prev_motor_command response
         plt.figure(figsize=(10, 6))
         plt.plot(prev_cmd_range, prev_cmd_actions)
@@ -189,13 +210,15 @@ class ModelAnalyzer:
 
         # Create meshgrid of states
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
-        
+
         # Create 3D states with fixed prev_cmd
-        states_3d = np.column_stack((
-            theta_mesh.flatten(), 
-            theta_dot_mesh.flatten(),
-            np.ones(theta_mesh.size) * prev_cmd  # Fixed previous command
-        ))
+        states_3d = np.column_stack(
+            (
+                theta_mesh.flatten(),
+                theta_dot_mesh.flatten(),
+                np.ones(theta_mesh.size) * prev_cmd,  # Fixed previous command
+            )
+        )
 
         # Predict actions
         actions = self.predict_actions(states_3d)
@@ -236,33 +259,44 @@ class ModelAnalyzer:
     def create_action_heatmaps_for_multiple_prev_cmds(self):
         """Create action heatmaps for different previous command values."""
         print("Creating multiple action heatmaps...")
-        
+
         prev_cmd_values = [-1.0, -0.5, 0.0, 0.5, 1.0]
-        
+
         for prev_cmd in prev_cmd_values:
             self.create_action_heatmap(prev_cmd)
-        
+
         print("All action heatmaps created.")
 
     def create_phase_space_plot(self):
-        """Create phase space plot with velocity fields."""
+        """Create phase space plot with velocity fields using SimNet."""
         print("Creating phase space plot...")
 
         # Create meshgrid for phase space
         theta_mesh, theta_dot_mesh = np.meshgrid(self.phase_theta_range, self.phase_theta_dot_range)
 
         # Prepare states for prediction
-        states = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten()))
+        states = np.column_stack(
+            (
+                theta_mesh.flatten(),
+                theta_dot_mesh.flatten(),
+                np.zeros(theta_mesh.size),  # Initialize prev_action to zero
+            )
+        )
 
         # Predict actions
         actions = self.predict_actions(states)
 
-        # Calculate accelerations based on actions using physics model
+        # Calculate accelerations using SimNet
         accelerations = []
         for state, action in zip(states, actions):
-            # Access the physics engine to get accurate acceleration
-            theta_ddot = self.env.physics.get_acceleration(state, action)
-            accelerations.append(theta_ddot)
+            # Predict next state using SimNet
+            next_state = self.predict_next_state_simnet(state, action)
+
+            # Calculate acceleration as the change in angular velocity
+            # divided by the time step
+            dt = self.env.physics.params.dt
+            acceleration = (next_state[1] - state[1]) / dt
+            accelerations.append(acceleration)
 
         accelerations = np.array(accelerations).reshape(theta_mesh.shape)
 
@@ -277,8 +311,8 @@ class ModelAnalyzer:
 
         # Normalize vectors for visualization
         norm = np.sqrt(u**2 + v**2)
-        u_norm = u / norm
-        v_norm = v / norm
+        u_norm = u / np.where(norm > 1e-8, norm, 1e-8)  # Avoid division by zero
+        v_norm = v / np.where(norm > 1e-8, norm, 1e-8)
 
         # Plot phase space
         plt.figure(figsize=(12, 10))
@@ -294,7 +328,7 @@ class ModelAnalyzer:
         plt.colorbar(label="Velocity Magnitude")
         plt.xlabel("Angle θ (degrees)")
         plt.ylabel("Angular Velocity θ̇ (rad/s)")
-        plt.title("Phase Space Dynamics")
+        plt.title("Phase Space Dynamics (SimNet)")
         plt.axhline(y=0, color="k", linestyle="--", alpha=0.3)
         plt.axvline(x=0, color="k", linestyle="--", alpha=0.3)
         plt.grid(alpha=0.3)
@@ -309,7 +343,13 @@ class ModelAnalyzer:
 
         # Create meshgrid of states
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
-        states = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten()))
+        states = np.column_stack(
+            (
+                theta_mesh.flatten(),
+                theta_dot_mesh.flatten(),
+                np.zeros(theta_mesh.size),  # Initialize prev_action to zero
+            )
+        )
 
         # Predict actions
         actions = self.predict_actions(states)
@@ -363,7 +403,7 @@ class ModelAnalyzer:
         print("3D action surface created and saved.")
 
     def analyze_stability_regions(self):
-        """Analyze stability regions by simulating trajectories."""
+        """Analyze stability regions by simulating trajectories using SimNet."""
         print("Analyzing stability regions...")
 
         # Define a grid of initial conditions
@@ -384,17 +424,16 @@ class ModelAnalyzer:
         # Simulate trajectories from each initial condition
         for i, theta in enumerate(tqdm(thetas, desc="Simulating trajectories")):
             for j, theta_dot in enumerate(theta_dots):
-                # Initialize state
-                state = np.array([theta, theta_dot])
+                # Initialize state with a full 3-element vector for SimNet
+                state = np.array([theta, theta_dot, 0.0])  # Initial prev_action = 0.0
 
-                # Simulate trajectory
+                # Simulate trajectory using SimNet
                 for step in range(max_steps):
-                    # Get action
+                    # Get action from actor network
                     action = self.predict_actions([state])[0]
 
-                    # Update state using physics model
-                    accel = self.env.physics.get_acceleration(state, action)
-                    next_state = self.env.physics.integrate_state(state, accel)
+                    # Predict next state using SimNet
+                    next_state = self.predict_next_state_simnet(state, action)
 
                     # Check if balanced
                     if abs(next_state[0]) < stable_threshold and abs(next_state[1]) < stable_threshold:
@@ -419,7 +458,7 @@ class ModelAnalyzer:
         plt.colorbar(label="Convergence (1=stable)")
         plt.xlabel("Initial Angle θ (degrees)")
         plt.ylabel("Initial Angular Velocity θ̇ (rad/s)")
-        plt.title("Controller Stability Regions")
+        plt.title("Controller Stability Regions (SimNet)")
         plt.axhline(y=0, color="k", linestyle="--", alpha=0.3)
         plt.axvline(x=0, color="k", linestyle="--", alpha=0.3)
         plt.grid(alpha=0.3)
@@ -437,7 +476,7 @@ class ModelAnalyzer:
         plt.colorbar(label="Steps to Stabilize")
         plt.xlabel("Initial Angle θ (degrees)")
         plt.ylabel("Initial Angular Velocity θ̇ (rad/s)")
-        plt.title("Steps to Stabilize")
+        plt.title("Steps to Stabilize (SimNet)")
         plt.axhline(y=0, color="k", linestyle="--", alpha=0.3)
         plt.axvline(x=0, color="k", linestyle="--", alpha=0.3)
         plt.grid(alpha=0.3)
@@ -468,8 +507,14 @@ class ModelAnalyzer:
         theta_mesh = center_theta + delta_theta_mesh
         theta_dot_mesh = center_theta_dot + delta_theta_dot_mesh
 
-        # Prepare states for prediction
-        states = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten()))
+        # Prepare states for prediction (include zero prev_action)
+        states = np.column_stack(
+            (
+                theta_mesh.flatten(),
+                theta_dot_mesh.flatten(),
+                np.zeros(theta_mesh.size),  # Initialize prev_action to zero
+            )
+        )
 
         # Predict actions
         actions = self.predict_actions(states)
@@ -512,7 +557,7 @@ class ModelAnalyzer:
         theta_dot_values = [-3.0, -1.5, 0.0, 1.5, 3.0]
 
         for theta_dot in theta_dot_values:
-            states = np.array([[theta, theta_dot] for theta in self.theta_range])
+            states = np.array([[theta, theta_dot, 0.0] for theta in self.theta_range])
             actions = self.predict_actions(states)
 
             plt.plot(self.theta_range * 180 / np.pi, actions, label=f"θ̇ = {theta_dot} rad/s")
@@ -534,7 +579,7 @@ class ModelAnalyzer:
         theta_labels = ["-30°", "-15°", "0°", "15°", "30°"]
 
         for theta, label in zip(theta_values, theta_labels):
-            states = np.array([[theta, theta_dot] for theta_dot in self.theta_dot_range])
+            states = np.array([[theta, theta_dot, 0.0] for theta_dot in self.theta_dot_range])
             actions = self.predict_actions(states)
 
             plt.plot(self.theta_dot_range, actions, label=f"θ = {label}")
@@ -558,11 +603,10 @@ class ModelAnalyzer:
         # Create a dense grid around the balanced state
         balanced_theta = 0.0
         balanced_theta_dot = 0.0
+        prev_action = 0.0
 
         # Compute action at balanced state
-        balanced_action = self.predict_actions(np.array([[balanced_theta, balanced_theta_dot]]))[0][
-            0
-        ]  # Get scalar value
+        balanced_action = self.predict_actions(np.array([[balanced_theta, balanced_theta_dot, prev_action]]))[0][0]
 
         # Create small perturbation range
         delta = 0.05
@@ -570,11 +614,11 @@ class ModelAnalyzer:
         theta_dots = np.linspace(-20 * delta, 20 * delta, 100)
 
         # Compute actions for varying theta (with theta_dot = 0)
-        theta_only_states = np.array([[theta, 0.0] for theta in thetas])
+        theta_only_states = np.array([[theta, 0.0, prev_action] for theta in thetas])
         theta_only_actions = self.predict_actions(theta_only_states).flatten()  # Flatten to 1D array
 
         # Compute actions for varying theta_dot (with theta = 0)
-        theta_dot_only_states = np.array([[0.0, theta_dot] for theta_dot in theta_dots])
+        theta_dot_only_states = np.array([[0.0, theta_dot, prev_action] for theta_dot in theta_dots])
         theta_dot_only_actions = self.predict_actions(theta_dot_only_states).flatten()  # Flatten to 1D array
 
         # Compute linear approximation coefficients (partial derivatives at origin)
@@ -614,7 +658,9 @@ class ModelAnalyzer:
 
         # Create 2D nonlinearity analysis
         theta_mesh, theta_dot_mesh = np.meshgrid(thetas, theta_dots)
-        states = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten()))
+        states = np.column_stack(
+            (theta_mesh.flatten(), theta_dot_mesh.flatten(), np.ones(theta_mesh.size) * prev_action)
+        )
 
         # Predict DDPG controller actions
         actions = self.predict_actions(states)
