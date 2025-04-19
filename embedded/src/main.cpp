@@ -377,12 +377,15 @@ void setup() {
         delay(1000);
         
         Serial.println("Initializing DDPG controller...");
-        if (!ddpgController.init(maxPwr)) {
+        // Use 10% max change per step by default
+        float max_delta = 0.1f;
+        if (!ddpgController.init(maxPwr, max_delta)) {
             Serial.println("DDPG initialization failed");
             M5.Lcd.setCursor(0, 110);
             M5.Lcd.print("DDPG Init Failed");
         } else {
             Serial.println("DDPG initialized successfully");
+            Serial.printf("Max PWM: %d, Max delta: %.2f\n", maxPwr, max_delta);
         }
         
         if (!logger.begin(WIFI_SSID, WIFI_PASSWORD, UDP_PORT)) {

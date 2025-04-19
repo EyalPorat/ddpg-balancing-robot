@@ -6,7 +6,12 @@ from typing import Tuple
 
 
 class Actor(nn.Module):
-    """Actor network for DDPG."""
+    """Actor network for DDPG using delta-based control.
+
+    In delta-based control, the actor outputs a change (delta) to be applied to
+    the previous action, rather than outputting the absolute action directly.
+    This typically results in smoother control and better policy generalization.
+    """
 
     def __init__(self, state_dim: int, action_dim: int, max_action: float, hidden_dims: Tuple[int, ...] = (8, 8)):
         """Initialize actor network.
@@ -14,8 +19,13 @@ class Actor(nn.Module):
         Args:
             state_dim: Dimension of state space
             action_dim: Dimension of action space
-            max_action: Maximum action value
+            max_action: Maximum action value (for delta-based control, typically 1.0)
             hidden_dims: Dimensions of hidden layers
+
+        Note:
+            For delta-based control, the actor output represents a change in action,
+            not the absolute action value. The environment is responsible for applying
+            this delta to the previous action and scaling by max_delta parameter.
         """
         super(Actor, self).__init__()
         self.max_action = max_action

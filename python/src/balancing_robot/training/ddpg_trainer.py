@@ -44,8 +44,12 @@ class DDPGTrainer:
 
         state_dim = env.observation_space.shape[0]
         action_dim = env.action_space.shape[0]
-        max_action = float(env.action_space.high[0])
+        # For delta-based control, max_action is always 1.0
+        # The environment handles scaling of delta actions
+        max_action = 1.0
 
+        # Note: For delta-based control, the actor outputs changes in the range [-1, 1]
+        # which are then scaled by the environment using max_delta parameter
         self.actor = Actor(
             state_dim=state_dim,
             action_dim=action_dim,

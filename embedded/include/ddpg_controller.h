@@ -13,6 +13,8 @@ public:
         initialized = false;
         prev_action = 0.0f;
         max_action = 0.0f;
+        max_delta = 0.1f;  // Default to 10% maximum change per step
+        current_motor_command = 0.0f;
     }
     
     ~DDPGController() {
@@ -20,11 +22,12 @@ public:
         if (receiver) delete receiver;
     }
 
-    bool init(float max_action) {
+    bool init(float max_action, float max_delta = 0.1f) {
         try {
             Serial.println("Starting DDPG init...");
             
             this->max_action = max_action;
+            this->max_delta = max_delta;
 
             // Use PSRAM if available
             if (psramFound()) {
@@ -36,7 +39,7 @@ public:
             Serial.println("Creating actor...");
             if (!actor) {
                 // (theta, theta_dot, prev_action)
-                actor = new DDPGActor(3, 10, 1, max_action);
+                actor = new DDPGActor(3, 10, 1, 1.0f);  // Note: Actor's max_action is 1.0, we scale later
                 if (!actor) {
                     Serial.println("Failed to create actor");
                     return false;
@@ -86,7 +89,7 @@ public:
             } else {
                 Serial.println("No weights file found");
             }
-            
+
 
             Serial.println("DDPG init complete");
             return true;
@@ -118,12 +121,25 @@ public:
     
         state_buffer[0] = theta;
         state_buffer[1] = theta_dot;
-        state_buffer[2] = prev_action;
+        state_buffer[2] = current_motor_command / max_action;  // Normalize to [-1, 1]
     
-        float action = actor->forward(state_buffer);
-        prev_action = action / max_action;
+        // Get the delta action from the actor
+        float delta_action = actor->forward(state_buffer);
         
-        return action;
+        // Scale delta by max_delta
+        delta_action *= max_delta;
+        
+        // Apply delta to current command and clip to valid range
+        float new_command = current_motor_command + (delta_action * max_action);
+        new_command = max(min(new_command, max_action), -max_action);
+        
+        // Store the normalized action for the next step
+        prev_action = delta_action;
+        
+        // Update current motor command
+        current_motor_command = new_command;
+        
+        return new_command;
     }
 
     bool isInitialized() const { return initialized; }
@@ -135,8 +151,10 @@ private:
     ModelReceiver* receiver;
     std::vector<float> state_buffer;
     bool initialized;
-    float prev_action;
-    float max_action;
+    float prev_action;  // Previous delta action
+    float max_action;   // Maximum torque/PWM
+    float max_delta;    // Maximum change allowed per step (as fraction)
+    float current_motor_command;  // Current applied motor command
 };
 
 #endif // DDPG_CONTROLLER_H

@@ -47,8 +47,11 @@ class BalancerEnv(gym.Env):
         # Maximum torque in N⋅m
         if self.config:
             self.max_torque = self.config["physics"]["max_torque"]
+            self.max_delta = self.config["physics"].get("max_delta", 0.1)  # Default to 10%
         else:
             self.max_torque = 0.23
+            self.max_delta = 0.1
+
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
 
         # Define observation space - [theta, theta_dot, prev_motor_command]
@@ -132,16 +135,25 @@ class BalancerEnv(gym.Env):
         return self.state, {}
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict]:
-        """Execute one environment step.
+        """Execute one environment step with delta-based action.
 
         Args:
-            action: Action to take (scaled motor torque)
+            action: Action to take (delta in motor command, scaled to [-1, 1])
 
         Returns:
             Tuple of (observation, reward, terminated, truncated, info)
         """
-        # Scale action to actual torque
-        torque = np.clip(action, -1.0, 1.0) * self.max_torque
+        # Get previous motor command from state
+        prev_motor_command = self.state[2]
+
+        # Calculate delta (scaled by max_delta)
+        delta = np.clip(action, -1.0, 1.0) * self.max_delta
+
+        # Apply delta to previous command and clip to valid range
+        new_motor_command = np.clip(prev_motor_command + delta, -1.0, 1.0)
+
+        # Scale the motor command to actual torque
+        torque = new_motor_command * self.max_torque
 
         # Extract theta and theta_dot for physics update
         theta, theta_dot, _ = self.state
@@ -159,14 +171,15 @@ class BalancerEnv(gym.Env):
                 [
                     new_state[0],  # Updated theta
                     new_state[1],  # Updated theta_dot
-                    action[0],  # Current action becomes previous action for next step
+                    new_motor_command[0],  # Store the new motor command
                 ]
             )
         else:
             s_tensor = torch.tensor(self.state, dtype=torch.float32, device=self.device).unsqueeze(0)
-            a_tensor = torch.tensor(action, dtype=torch.float32, device=self.device).unsqueeze(0)
+            # For SimNet, we need to provide the actual command, not the delta
+            a_tensor = torch.tensor([[new_motor_command[0]]], dtype=torch.float32, device=self.device)
             self.state = self.simnet(s_tensor, a_tensor).cpu().detach().numpy()[0]
-            self.state[2] = action[0]
+            self.state[2] = new_motor_command[0]  # Ensure the motor command is correctly stored
 
         # Add noise to state
         if self.config:
@@ -176,7 +189,7 @@ class BalancerEnv(gym.Env):
             self.state[:2] += noise
 
         self.steps += 1
-        self.prev_action = action[0]  # Store current action for next step
+        self.prev_action = new_motor_command[0]  # Store current motor command for next step
 
         # Check if reached stable state
         min_angle_for_stable = np.deg2rad(3)
@@ -198,6 +211,7 @@ class BalancerEnv(gym.Env):
                 "angle": self.state[0],
                 "energy": self.physics.get_energy(self.state[:2]),
                 "prev_motor_command": self.state[2],
+                "delta": delta[0],  # Include delta in info for analysis
             },
             "reached_stable": reached_stable,
         }

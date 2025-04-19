@@ -135,7 +135,9 @@ def main():
         config = yaml.safe_load(f)
 
     # Create model with 3D state input (includes prev_motor_command)
-    actor = Actor(state_dim=3, action_dim=1, max_action=config["physics"]["max_torque"], hidden_dims=(10,))
+    # Note: For delta-based control, the actor internally uses max_action=1.0
+    # The actual max_action scaling happens in the controller
+    actor = Actor(state_dim=3, action_dim=1, max_action=1.0, hidden_dims=(10,))
 
     checkpoint = torch.load(args.model, map_location=torch.device("cpu"))
     actor.load_state_dict(checkpoint["state_dict"])
