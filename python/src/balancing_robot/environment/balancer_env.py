@@ -117,12 +117,14 @@ class BalancerEnv(gym.Env):
         # Initialize with random angle and angular velocity
         theta_deg = self.np_random.uniform(-50, 50)  # theta in degrees
         theta_dot_deg = self.np_random.uniform(-150, 150)  # theta_dot in degrees per second
+        prev_motor_command = self.np_random.uniform(-1.0, 1.0)  # Random initial motor command
 
         self.state = np.array(
             [
                 np.deg2rad(theta_deg),  # Convert theta to radians
                 np.deg2rad(theta_dot_deg),  # Convert theta_dot to radians per second
-                0.0,  # Initialize previous motor command to zero
+                # 0.0,  # Initialize previous motor command to zero
+                prev_motor_command,  # Use random initial motor command
             ]
         )
 
@@ -192,8 +194,8 @@ class BalancerEnv(gym.Env):
         self.prev_action = new_motor_command[0]  # Store current motor command for next step
 
         # Check if reached stable state
-        min_angle_for_stable = np.deg2rad(3)
-        min_angular_velocity_for_stable = np.deg2rad(3)
+        min_angle_for_stable = np.deg2rad(6)
+        min_angular_velocity_for_stable = np.deg2rad(6)
         reached_stable = (
             abs(self.state[0]) < min_angle_for_stable and abs(self.state[1]) < min_angular_velocity_for_stable
         )
