@@ -98,7 +98,7 @@ class ModelAnalyzer:
             hidden_dims = self.ddpg_config["model"]["actor"].get("hidden_dims", hidden_dims)
 
         # Get max action from environment config
-        max_action = self.env_config["physics"].get("max_torque", 0.23)
+        max_action = self.env_config["physics"].get("max_torque", 1.0)
 
         # Create actor model (3 inputs - theta, theta_dot, prev_motor_command)
         actor = Actor(state_dim=3, action_dim=1, max_action=max_action, hidden_dims=hidden_dims).to(self.device)
@@ -420,13 +420,16 @@ class ModelAnalyzer:
         # Simulation parameters
         max_steps = 500
         stable_threshold_theta = np.deg2rad(6)
-        stable_threshold_theta_dot = np.deg2rad(30)
+        stable_threshold_theta_dot = np.deg2rad(50)
 
         # Simulate trajectories from each initial condition
         for i, theta in enumerate(tqdm(thetas, desc="Simulating trajectories")):
             for j, theta_dot in enumerate(theta_dots):
                 # Initialize state with a full 3-element vector for SimNet
                 state = np.array([theta, theta_dot, 0.0])  # Initial prev_action = 0.0
+
+                # Keep track of last 10 theta_dot values
+                theta_dot_history = [theta_dot] * 10  # Initialize with initial value
 
                 # Simulate trajectory using SimNet
                 for step in range(max_steps):
@@ -436,8 +439,15 @@ class ModelAnalyzer:
                     # Predict next state using SimNet
                     next_state = self.predict_next_state_simnet(state, action)
 
-                    # Check if balanced
-                    if abs(next_state[0]) < stable_threshold_theta and abs(next_state[1]) < stable_threshold_theta_dot:
+                    # Update theta_dot history
+                    theta_dot_history.pop(0)  # Remove oldest
+                    theta_dot_history.append(next_state[1])  # Add newest
+
+                    # Check if balanced using average of last 10 readings for angular velocity
+                    if (
+                        abs(next_state[0]) < stable_threshold_theta
+                        and abs(np.mean(theta_dot_history)) < stable_threshold_theta_dot
+                    ):
                         stability_grid[i, j] = 1
                         steps_to_stabilize[i, j] = step
                         break

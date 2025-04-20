@@ -107,6 +107,11 @@ public:
     void update() {
         if (!receiver) return;
         receiver->update();
+
+        // Uninitialize controller if receiver is not receiving
+        if (receiver->isReceiving()) {
+            initialized = false;
+        }
         
         if (!initialized && receiver->getProgress() == 1.0f) {
             if (actor && actor->loadWeights("/actor_weights.bin")) {

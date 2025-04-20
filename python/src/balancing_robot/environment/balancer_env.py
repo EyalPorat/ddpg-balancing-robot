@@ -303,10 +303,13 @@ class BalancerEnv(gym.Env):
             # Reward is highest when both angle and angular velocity are zero
             # and decreases as either increases
             angle_factor = 1.0 - (abs(theta) / angle_threshold)
-            velocity_factor = max(0, 1.0 - (abs(theta_dot) / np.deg2rad(40)))  # 0.5 rad/s threshold
             stillness_reward = (
-                w["stillness"] * angle_factor * velocity_factor**2
+                w["stillness"] * angle_factor
             )  # Square velocity term for stronger effect
+
+            if abs(theta_dot) < np.deg2rad(30):
+                velocity_factor = max(0, 1.0 - (abs(theta_dot) / np.deg2rad(40)))  # 0.5 rad/s threshold
+                stillness_reward += velocity_factor**2 * w["stillness"]
 
         termination_penalty = -20 if self._check_termination() else 0
 

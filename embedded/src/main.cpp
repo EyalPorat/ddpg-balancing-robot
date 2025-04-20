@@ -377,8 +377,8 @@ void setup() {
         delay(1000);
         
         Serial.println("Initializing DDPG controller...");
-        // Use 10% max change per step by default
-        float max_delta = 0.1f;
+        // Use 25% max change per step by default
+        float max_delta = 0.25f;
         if (!ddpgController.init(maxPwr, max_delta)) {
             Serial.println("DDPG initialization failed");
             M5.Lcd.setCursor(0, 110);

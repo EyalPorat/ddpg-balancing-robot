@@ -39,7 +39,7 @@ reward:
   # angle_decay: 15.0
 
   "angle": 5.0
-  "direction": 7.5
+  "direction": 12.0
   "stillness": 69.0
   "angular_velocity": 1.0
   "angle_decay": 30.0
