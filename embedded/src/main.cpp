@@ -214,11 +214,15 @@ void drive() {
     if (!standing) return;
 
     if (demoMode == MODE_DDPG && ddpgController.isInitialized()) {
+        // Get action from DDPG controller
+        // The controller internally converts theta and theta_dot to normalized action
+        // and returns a value scaled to the actual PWM range [-maxPwr, maxPwr]
         float action = ddpgController.getAction(
             varAngDDPG * DEG_TO_RAD,  // Convert to radians
             varOmg * DEG_TO_RAD   // Convert to radians
         );
         
+        // Constrain the action to the valid PWM range
         action = constrain(action, -maxPwr, maxPwr);
         driveMotorL(action);
         driveMotorR(action);
@@ -377,7 +381,8 @@ void setup() {
         delay(1000);
         
         Serial.println("Initializing DDPG controller...");
-        // Use 25% max change per step by default
+        // max_delta is the maximum change allowed per step in the normalized action space [-1, 1]
+        // 0.25 means 25% of the full range can change in a single step
         float max_delta = 0.25f;
         if (!ddpgController.init(maxPwr, max_delta)) {
             Serial.println("DDPG initialization failed");

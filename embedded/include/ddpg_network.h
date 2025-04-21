@@ -355,6 +355,8 @@ public:
         }
         
         // Apply tanh and scale by max_action
+        // max_action is always 1.0 here, ensuring output is in [-1, 1] range
+        // The actual scaling to PWM values happens in DDPGController::getAction
         return max_action * tanh(output);
     }
 

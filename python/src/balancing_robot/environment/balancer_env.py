@@ -43,14 +43,16 @@ class BalancerEnv(gym.Env):
         self.render_mode = render_mode
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Define action space (motor torque)
-        # Maximum torque in N⋅m
+        # Define action space (always normalized to [-1, 1])
+        # The actor network always outputs values in this range
         if self.config:
+            # max_torque is only used in physics simulation to scale normalized actions to actual torque values
             self.max_torque = self.config["physics"]["max_torque"]
-            self.max_delta = self.config["physics"].get("max_delta", 0.1)  # Default to 10%
+            # max_delta is the maximum change allowed in the normalized action space [-1, 1]
+            self.max_delta = self.config["physics"].get("max_delta", 0.1)  # Default to 10% of normalized range
         else:
-            self.max_torque = 0.23
-            self.max_delta = 0.1
+            self.max_torque = 0.23  # Used only for physics simulation
+            self.max_delta = 0.1  # 10% of normalized range
 
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
 
@@ -155,6 +157,7 @@ class BalancerEnv(gym.Env):
         new_motor_command = np.clip(prev_motor_command + delta, -1.0, 1.0)
 
         # Scale the motor command to actual torque
+        # This is the only place where max_torque is used - to convert normalized [-1, 1] to physical torque
         torque = new_motor_command * self.max_torque
 
         # Extract theta and theta_dot for physics update
@@ -303,9 +306,7 @@ class BalancerEnv(gym.Env):
             # Reward is highest when both angle and angular velocity are zero
             # and decreases as either increases
             angle_factor = 1.0 - (abs(theta) / angle_threshold)
-            stillness_reward = (
-                w["stillness"] * angle_factor
-            )  # Square velocity term for stronger effect
+            stillness_reward = w["stillness"] * angle_factor  # Square velocity term for stronger effect
 
             if abs(theta_dot) < np.deg2rad(30):
                 velocity_factor = max(0, 1.0 - (abs(theta_dot) / np.deg2rad(40)))  # 0.5 rad/s threshold

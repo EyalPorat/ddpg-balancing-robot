@@ -26,7 +26,12 @@ public:
         try {
             Serial.println("Starting DDPG init...");
             
+            // max_action is the maximum PWM value (typically 127)
+            // Used to scale the normalized [-1, 1] output from the actor
             this->max_action = max_action;
+            
+            // max_delta is the maximum allowed change in normalized action space [-1, 1]
+            // It's a fraction between 0 and 1
             this->max_delta = max_delta;
 
             // Use PSRAM if available
@@ -39,7 +44,7 @@ public:
             Serial.println("Creating actor...");
             if (!actor) {
                 // (theta, theta_dot, prev_action)
-                actor = new DDPGActor(3, 10, 1, 1.0f);  // Note: Actor's max_action is 1.0, we scale later
+                actor = new DDPGActor(3, 10, 1, 1.0f);  // Note: Actor always outputs in [-1, 1] range
                 if (!actor) {
                     Serial.println("Failed to create actor");
                     return false;
@@ -128,15 +133,15 @@ public:
         state_buffer[1] = theta_dot;
         state_buffer[2] = current_motor_command / max_action;  // Normalize to [-1, 1]
     
-        // Get the delta action from the actor
+        // Get the delta action from the actor (already in [-1, 1] range)
         float delta_action = actor->forward(state_buffer);
         
-        // Scale delta by max_delta
+        // Scale delta by max_delta (which is a fraction of the normalized range)
         delta_action *= max_delta;
         
         // Apply delta to current command and clip to valid range
         float new_command = current_motor_command + (delta_action * max_action);
-        new_command = max(min(new_command, max_action), -max_action);
+        new_command = constrain(new_command, -max_action, max_action);
         
         // Store the normalized action for the next step
         prev_action = delta_action;

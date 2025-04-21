@@ -135,8 +135,8 @@ def main():
         config = yaml.safe_load(f)
 
     # Create model with 3D state input (includes prev_motor_command)
-    # Note: For delta-based control, the actor internally uses max_action=1.0
-    # The actual max_action scaling happens in the controller
+    # We always use max_action=1.0 for the actor, as actions are normalized to [-1, 1]
+    # The scaling to actual PWM values happens in the embedded controller
     actor = Actor(state_dim=3, action_dim=1, max_action=1.0, hidden_dims=(10,))
 
     checkpoint = torch.load(args.model, map_location=torch.device("cpu"))

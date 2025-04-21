@@ -13,8 +13,8 @@ physics:
   wheel_inertia: 2.0e-5  # kg⋅m²
   
   # Motor parameters
-  max_torque: 0.23       # N⋅m
-  max_delta: 0.25         # Max change in motor command (as fraction of max_torque)
+  max_torque: 0.23       # N⋅m (used only in physics simulation to scale normalized actions)
+  max_delta: 0.25         # Max change in normalized action (as fraction of [-1, 1] range)
   motor_deadzone: 0.04   # N⋅m
   static_friction: 0.7   # coefficient
   

@@ -97,14 +97,15 @@ class ModelAnalyzer:
         if self.ddpg_config and "model" in self.ddpg_config and "actor" in self.ddpg_config["model"]:
             hidden_dims = self.ddpg_config["model"]["actor"].get("hidden_dims", hidden_dims)
 
-        # Get max action from environment config
-        max_action = self.env_config["physics"].get("max_torque", 1.0)
+        # We always use max_action=1.0 for the actor - actions are normalized to [-1, 1]
+        # Scaling to physical torque happens in the environment
+        max_action = 1.0
 
         # Create actor model (3 inputs - theta, theta_dot, prev_motor_command)
         actor = Actor(state_dim=3, action_dim=1, max_action=max_action, hidden_dims=hidden_dims).to(self.device)
 
         print(f"Loading model with architecture: state_dim=3, action_dim=1, hidden_dims={hidden_dims}")
-        print(f"Max action from config: {max_action}")
+        print(f"Using normalized action space with max_action=1.0")
 
         # Load weights
         checkpoint = torch.load(self.model_path, map_location=torch.device(self.device))
@@ -134,7 +135,7 @@ class ModelAnalyzer:
 
         Args:
             state: Current state array [theta, theta_dot, prev_action]
-            action: Action array
+            action: Action array (normalized to [-1, 1])
 
         Returns:
             Next state array [theta, theta_dot, action]
@@ -171,7 +172,7 @@ class ModelAnalyzer:
         plt.plot(self.theta_range * 180 / np.pi, theta_actions)
         plt.grid(True)
         plt.xlabel("Angle θ (degrees)")
-        plt.ylabel("Action (torque)")
+        plt.ylabel("Action (normalized [-1, 1])")
         plt.title("Controller Response to Body Angle")
         plt.axhline(y=0, color="r", linestyle="--", alpha=0.3)
         plt.axvline(x=0, color="r", linestyle="--", alpha=0.3)
@@ -183,7 +184,7 @@ class ModelAnalyzer:
         plt.plot(self.theta_dot_range, theta_dot_actions)
         plt.grid(True)
         plt.xlabel("Angular Velocity θ̇ (rad/s)")
-        plt.ylabel("Action (torque)")
+        plt.ylabel("Action (normalized [-1, 1])")
         plt.title("Controller Response to Angular Velocity")
         plt.axhline(y=0, color="r", linestyle="--", alpha=0.3)
         plt.axvline(x=0, color="r", linestyle="--", alpha=0.3)
@@ -194,8 +195,8 @@ class ModelAnalyzer:
         plt.figure(figsize=(10, 6))
         plt.plot(prev_cmd_range, prev_cmd_actions)
         plt.grid(True)
-        plt.xlabel("Previous Motor Command")
-        plt.ylabel("Action (torque)")
+        plt.xlabel("Previous Motor Command (normalized [-1, 1])")
+        plt.ylabel("Action (normalized [-1, 1])")
         plt.title("Controller Response to Previous Motor Command")
         plt.axhline(y=0, color="r", linestyle="--", alpha=0.3)
         plt.axvline(x=0, color="r", linestyle="--", alpha=0.3)
@@ -231,7 +232,7 @@ class ModelAnalyzer:
         theta_degrees = self.theta_range * 180 / np.pi
 
         heatmap = plt.pcolormesh(theta_degrees, self.theta_dot_range, action_mesh, cmap="coolwarm", shading="auto")
-        plt.colorbar(heatmap, label="Action (torque)")
+        plt.colorbar(heatmap, label="Action (normalized [-1, 1])")
         plt.xlabel("Angle θ (degrees)")
         plt.ylabel("Angular Velocity θ̇ (rad/s)")
         plt.title(f"Controller Action Map (prev_cmd={prev_cmd})")
@@ -374,7 +375,7 @@ class ModelAnalyzer:
         )
 
         # Add color bar
-        fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5, label="Action (torque)")
+        fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5, label="Action (normalized [-1, 1])")
 
         # Add zero plane
         ax.contour(
@@ -389,7 +390,7 @@ class ModelAnalyzer:
         # Set labels and title
         ax.set_xlabel("Angle θ (degrees)")
         ax.set_ylabel("Angular Velocity θ̇ (rad/s)")
-        ax.set_zlabel("Action (torque)")
+        ax.set_zlabel("Action (normalized [-1, 1])")
         ax.set_title("3D Controller Action Surface")
 
         # Add reference planes
@@ -839,7 +840,7 @@ class ModelAnalyzer:
 
         plt.grid(True)
         plt.xlabel("Time (s)")
-        plt.ylabel("Action (torque)")
+        plt.ylabel("Action (normalized [-1, 1])")
         plt.title("Controller Actions")
         plt.legend(loc="upper right")
         plt.tight_layout()
@@ -887,7 +888,8 @@ class ModelAnalyzer:
         kd = 1  # Derivative gain
 
         # Create lambda function for PD controller
-        pd_controller = lambda theta, theta_dot: (kp * theta + kd * theta_dot)
+        # Output normalized to [-1, 1] range for fair comparison with DDPG
+        pd_controller = lambda theta, theta_dot: np.clip(-(kp * theta + kd * theta_dot), -1.0, 1.0)
 
         # Create state grid for comparison
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
@@ -920,7 +922,7 @@ class ModelAnalyzer:
             vmin=-np.max(np.abs(ddpg_action_mesh)),
             vmax=np.max(np.abs(ddpg_action_mesh)),
         )
-        plt.colorbar(im1, ax=axs[0, 0], label="Torque")
+        plt.colorbar(im1, ax=axs[0, 0], label="Action (normalized [-1, 1])")
         axs[0, 0].set_title("DDPG Controller")
         axs[0, 0].set_xlabel("Angle θ (degrees)")
         axs[0, 0].set_ylabel("Angular Velocity θ̇ (rad/s)")
@@ -1052,6 +1054,8 @@ class ModelAnalyzer:
         <body>
             <h1>Balancing Robot Model Analysis</h1>
             <p>Analysis of the trained DDPG controller for the balancing robot.</p>
+            <p>Note: All controller actions are normalized to [-1, 1] range. In the actual robot, 
+            these values are scaled to appropriate PWM values or torques.</p>
         """
 
         # Group images by category based on filename

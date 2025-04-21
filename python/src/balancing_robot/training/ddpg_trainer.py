@@ -44,8 +44,8 @@ class DDPGTrainer:
 
         state_dim = env.observation_space.shape[0]
         action_dim = env.action_space.shape[0]
-        # For delta-based control, max_action is always 1.0
-        # The environment handles scaling of delta actions
+
+        # We always use max_action=1.0 for the actor
         max_action = 1.0
 
         # Note: For delta-based control, the actor outputs changes in the range [-1, 1]
@@ -208,13 +208,15 @@ class DDPGTrainer:
             "q_value": float(current_Q.mean().item()),
             "action_noise": float(self.action_noise * (self.noise_decay**self.training_steps)),
         }
-        
+
         if self.prioritized_replay:
-            metrics.update({
-            "mean_priority": float(np.mean(new_priorities)),
-            "max_priority": float(np.max(new_priorities)),
-            })
-            
+            metrics.update(
+                {
+                    "mean_priority": float(np.mean(new_priorities)),
+                    "max_priority": float(np.max(new_priorities)),
+                }
+            )
+
         return metrics
 
     def train(
