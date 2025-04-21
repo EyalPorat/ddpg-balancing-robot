@@ -421,7 +421,7 @@ class ModelAnalyzer:
         # Simulation parameters
         max_steps = 500
         stable_threshold_theta = np.deg2rad(6)
-        stable_threshold_theta_dot = np.deg2rad(50)
+        stable_threshold_theta_dot = np.deg2rad(20)
 
         # Simulate trajectories from each initial condition
         for i, theta in enumerate(tqdm(thetas, desc="Simulating trajectories")):
@@ -430,7 +430,7 @@ class ModelAnalyzer:
                 state = np.array([theta, theta_dot, 0.0])  # Initial prev_action = 0.0
 
                 # Keep track of last 10 theta_dot values
-                theta_dot_history = [theta_dot] * 10  # Initialize with initial value
+                theta_dot_history = [theta_dot] * 2  # Initialize with initial value
 
                 # Simulate trajectory using SimNet
                 for step in range(max_steps):

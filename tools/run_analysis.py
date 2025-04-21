@@ -55,8 +55,8 @@ def main():
         analyzer.create_action_heatmap()
         analyzer.create_phase_space_plot()
     elif args.type == "performance":
-        analyzer.analyze_stability_regions()
         analyzer.analyze_simulated_trajectories()
+        analyzer.analyze_stability_regions()
     elif args.type == "comparison":
         analyzer.generate_comparative_pd_controller()
         analyzer.analyze_controller_nonlinearity()
