@@ -130,26 +130,6 @@ class ModelAnalyzer:
             actions = self.actor(states_tensor).cpu().numpy()
         return actions
 
-    def predict_next_state_simnet(self, state, action):
-        """Predict next state using SimNet.
-
-        Args:
-            state: Current state array [theta, theta_dot, prev_action]
-            action: Action array (normalized to [-1, 1])
-
-        Returns:
-            Next state array [theta, theta_dot, action]
-        """
-        with torch.no_grad():
-            # Convert to tensors
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            action_tensor = torch.FloatTensor(action).unsqueeze(0).to(self.device)
-
-            # Predict next state
-            next_state = self.simnet(state_tensor, action_tensor).squeeze(0).cpu().numpy()
-
-        return next_state
-
     def analyze_response_curves(self):
         """Analyze controller response to varying state inputs."""
         print("Analyzing response curves...")
@@ -290,8 +270,10 @@ class ModelAnalyzer:
         # Calculate accelerations using SimNet
         accelerations = []
         for state, action in zip(states, actions):
+            self.env.reset(state=state)  # Reset environment to the current state
+
             # Predict next state using SimNet
-            next_state = self.predict_next_state_simnet(state, action)
+            next_state, _, _, _, _ = self.env.step(action)
 
             # Calculate acceleration as the change in angular velocity
             # divided by the time step
@@ -427,7 +409,7 @@ class ModelAnalyzer:
         for i, theta in enumerate(tqdm(thetas, desc="Simulating trajectories")):
             for j, theta_dot in enumerate(theta_dots):
                 # Initialize state with a full 3-element vector for SimNet
-                state = np.array([theta, theta_dot, 0.0])  # Initial prev_action = 0.0
+                state, _ = self.env.reset(state=np.array([theta, theta_dot, 0.0]))  # Reset environment to the current state
 
                 # Keep track of last 10 theta_dot values
                 theta_dot_history = [theta_dot] * 2  # Initialize with initial value
@@ -438,7 +420,7 @@ class ModelAnalyzer:
                     action = self.predict_actions([state])[0]
 
                     # Predict next state using SimNet
-                    next_state = self.predict_next_state_simnet(state, action)
+                    next_state, _, _, _, _ = self.env.step(action)
 
                     # Update theta_dot history
                     theta_dot_history.pop(0)  # Remove oldest
@@ -760,8 +742,7 @@ class ModelAnalyzer:
 
         # Simulate trajectory for each initial condition
         for theta, theta_dot, label in initial_conditions:
-            # Initialize state
-            state = np.array([theta, theta_dot, 0.0])  # prev_action = 0.0
+            state, _ = self.env.reset(state=np.array([theta, theta_dot, 0.0]))  # Reset environment
 
             # Initialize trajectory
             trajectory = {"label": label, "states": [state.copy()], "actions": [], "time": [0.0]}
@@ -775,12 +756,7 @@ class ModelAnalyzer:
                 # Store action
                 trajectory["actions"].append(action[0])
 
-                # # Update state using physics model
-                # accel = self.env.physics.get_acceleration(state, action)
-                # next_state = self.env.physics.integrate_state(state, accel)
-
-                # Update state using SimNet
-                next_state = self.predict_next_state_simnet(state, action)
+                next_state, _, _, _, _ = self.env.step(action)
 
                 # Update time
                 current_time += self.env.physics.params.dt

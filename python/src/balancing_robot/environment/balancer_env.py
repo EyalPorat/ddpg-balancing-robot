@@ -93,6 +93,7 @@ class BalancerEnv(gym.Env):
                 "angle_decay": reward_config["angle_decay"],
                 "reached_stable_bonus": reward_config["reached_stable_bonus"],
                 "stillness": reward_config["stillness"],
+                "far_from_center_penalty": reward_config["far_from_center_penalty"],
             }
         else:
             self.reward_weights = {
@@ -102,34 +103,42 @@ class BalancerEnv(gym.Env):
                 "angle_decay": 30.0,
                 "reached_stable_bonus": 50.0,
                 "stillness": 5.0,
+                "far_from_center_penalty": 0.5,
             }
 
-    def reset(self, seed: Optional[int] = None, should_zero_previous_action: bool = False) -> Tuple[np.ndarray, Dict]:
+    def reset(self, seed: Optional[int] = None, should_zero_previous_action: bool = False, state: Optional[np.ndarray] = None) -> Tuple[np.ndarray, Dict]:
         """Reset environment to initial state.
 
         Args:
             seed: Random seed
+            should_zero_previous_action: If True, set previous action to zero
+            state: Optional initial state for the environment
 
         Returns:
             Tuple of (observation, info)
         """
         super().reset(seed=seed)
 
-        # Initialize with random angle and angular velocity
-        theta_deg = self.np_random.uniform(-50, 50)  # theta in degrees
-        theta_dot_dps = self.np_random.uniform(-150, 150)  # theta_dot in degrees per second
-        random_motor_command = self.np_random.uniform(-1.0, 1.0)  # Random initial motor command
-        prev_motor_command = 0.0 if should_zero_previous_action else random_motor_command
+        if state is not None:
+            # If a state is provided, use it directly
+            self.state = state
+        else:
 
-        self.state = np.array(
-            [
-                np.deg2rad(theta_deg),  # Convert theta to radians
-                np.deg2rad(theta_dot_dps),  # Convert theta_dot to radians per second
-                prev_motor_command,  # Use random initial motor command
-            ]
-        )
+            # Initialize with random angle and angular velocity
+            theta_deg = self.np_random.uniform(-50, 50)  # theta in degrees
+            theta_dot_dps = self.np_random.uniform(-150, 150)  # theta_dot in degrees per second
+            random_motor_command = self.np_random.uniform(-1.0, 1.0)  # Random initial motor command
+            prev_motor_command = 0.0 if should_zero_previous_action else random_motor_command
 
-        self.prev_action = prev_motor_command  # Store the initial motor command
+            self.state = np.array(
+                [
+                    np.deg2rad(theta_deg),  # Convert theta to radians
+                    np.deg2rad(theta_dot_dps),  # Convert theta_dot to radians per second
+                    prev_motor_command,  # Use random initial motor command
+                ]
+            )
+
+        self.prev_action = self.state[2]  # Store the initial motor command
         self.steps = 0
 
         if self.render_mode == "human":
@@ -319,10 +328,9 @@ class BalancerEnv(gym.Env):
 
         termination_penalty = -20 if self._check_termination() else 0
 
-        stable_reward = w["reached_stable_bonus"] if reached_stable else 0
-        # stable_reward = 0
+        far_from_center_penalty = -abs(theta) * w["far_from_center_penalty"]
 
-        reward = w["direction"] * direction_component + stillness_reward + termination_penalty + stable_reward
+        reward = w["direction"] * direction_component + stillness_reward + termination_penalty + far_from_center_penalty
 
         return float(reward)
 
