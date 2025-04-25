@@ -97,6 +97,28 @@ class DDPGTrainer:
         self.noise_decay = train_config["noise_decay"]
         self.min_noise = train_config["min_noise"]
 
+        # Curriculum learning parameters
+        self.use_curriculum = train_config.get("use_curriculum", True)  # Default to using curriculum
+        self.curriculum_epochs = train_config.get("curriculum_epochs", 200)
+        self.curriculum_initial_angle_range_precent = train_config.get("curriculum_initial_angle_range_precent", 0.2)
+        self.curriculum_initial_angular_velocity_range_precent = train_config.get(
+            "curriculum_initial_angular_velocity_range_precent", 0.2
+        )
+
+        # Default initialization ranges in the environment
+        self.final_theta_range = (-50, 50)  # degrees
+        self.final_theta_dot_range = (-150, 150)  # degrees per second
+
+        # Initial (easier) ranges for curriculum learning
+        self.initial_theta_range = (
+            self.final_theta_range[0] * self.curriculum_initial_angle_range_precent,
+            self.final_theta_range[1] * self.curriculum_initial_angle_range_precent
+        )
+        self.initial_theta_dot_range = (
+            self.final_theta_dot_range[0] * self.curriculum_initial_angular_velocity_range_precent,
+            self.final_theta_dot_range[1] * self.curriculum_initial_angular_velocity_range_precent
+        )
+
         # Set up logging
         self.logger = logging.getLogger(__name__)
         self.training_steps = 0
@@ -122,8 +144,44 @@ class DDPGTrainer:
                 "eval_frequency": 10,
                 "eval_episodes": 5,
                 "save_frequency": 100,
+                "use_curriculum": True,
+                "curriculum_epochs": 200,
+                "curriculum_initial_angle_range_precent": 0.2,
+                "curriculum_initial_angular_velocity_range_precent": 0.2,
             },
         }
+
+    def _calculate_curriculum_ranges(self, episode: int) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+        """
+        Calculate initialization ranges based on curriculum progress.
+
+        As episodes progress, the ranges gradually increase from initial to final values.
+
+        Args:
+            episode: Current episode number
+
+        Returns:
+            Tuple of (theta_range, theta_dot_range) to use for initialization
+        """
+        if not self.use_curriculum or episode >= self.curriculum_epochs:
+            # Use final ranges after curriculum is complete
+            return self.final_theta_range, self.final_theta_dot_range
+
+        # Calculate progress ratio (0.0 to 1.0)
+        progress = min(1.0, episode / self.curriculum_epochs)
+
+        # Linearly interpolate between initial and final ranges
+        theta_min = self.initial_theta_range[0] + progress * (self.final_theta_range[0] - self.initial_theta_range[0])
+        theta_max = self.initial_theta_range[1] + progress * (self.final_theta_range[1] - self.initial_theta_range[1])
+
+        theta_dot_min = self.initial_theta_dot_range[0] + progress * (
+            self.final_theta_dot_range[0] - self.initial_theta_dot_range[0]
+        )
+        theta_dot_max = self.initial_theta_dot_range[1] + progress * (
+            self.final_theta_dot_range[1] - self.initial_theta_dot_range[1]
+        )
+
+        return (theta_min, theta_max), (theta_dot_min, theta_dot_max)
 
     def select_action(self, state: np.ndarray, training: bool = True) -> np.ndarray:
         """Select action using current policy."""
@@ -247,7 +305,45 @@ class DDPGTrainer:
         progress_bar = tqdm(range(num_episodes), desc="Training", position=0, leave=True)
 
         for episode in progress_bar:
+            # Calculate initialization ranges based on curriculum
+            theta_range, theta_dot_range = self._calculate_curriculum_ranges(episode)
+
+            # Modify environment's random initialization ranges
+            # We need to monkey-patch the environment's reset method for this episode
+            original_reset = self.env.reset
+
+            def curriculum_reset(seed=None, should_zero_previous_action=False):
+                """Override environment reset to use curriculum ranges."""
+                super_reset = original_reset
+
+                # Reset with default parameters
+                state, info = super_reset(seed, should_zero_previous_action)
+
+                # Override the first two state components (theta and theta_dot)
+                # with values sampled from our curriculum ranges
+                theta_deg = self.env.np_random.uniform(theta_range[0], theta_range[1])
+                theta_dot_dps = self.env.np_random.uniform(theta_dot_range[0], theta_dot_range[1])
+
+                # Convert to radians and update state
+                self.env.state = np.array(
+                    [
+                        np.deg2rad(theta_deg),
+                        np.deg2rad(theta_dot_dps),
+                        self.env.state[2],  # Keep the previous motor command unchanged
+                    ]
+                )
+
+                return self.env.state, info
+
+            # Apply the patched reset method
+            self.env.reset = curriculum_reset
+
+            # Reset environment with curriculum ranges
             state, _ = self.env.reset()
+
+            # Restore original reset method after initialization
+            self.env.reset = original_reset
+
             episode_reward = 0
 
             for step in range(max_steps):
@@ -267,19 +363,34 @@ class DDPGTrainer:
                     if logger:
                         logger.log(metrics)
 
-                # # Stop episode if reached stable state
-                # if info.get("reached_stable", False):
-                #     break
-
                 if done:
                     break
 
+            # Log curriculum parameters
             if logger:
-                logger.log({"episode_reward": episode_reward, "episode_length": step + 1})
+                logger.log(
+                    {
+                        "episode_reward": episode_reward,
+                        "episode_length": step + 1,
+                        "curriculum_theta_min": theta_range[0],
+                        "curriculum_theta_max": theta_range[1],
+                        "curriculum_theta_dot_min": theta_dot_range[0],
+                        "curriculum_theta_dot_max": theta_dot_range[1],
+                        "curriculum_progress": (
+                            min(1.0, episode / self.curriculum_epochs) if self.use_curriculum else 1.0
+                        ),
+                    }
+                )
+
                 progress_bar.set_postfix(
                     {
                         "episode": episode + 1,
                         "reward": f"{episode_reward:.2f}",
+                        "curriculum": (
+                            f"{min(100, int(episode * 100 / self.curriculum_epochs))}%"
+                            if self.use_curriculum and episode < self.curriculum_epochs
+                            else "done"
+                        ),
                         "actor_loss": logger.get_latest("actor_loss"),
                         "critic_loss": logger.get_latest("critic_loss"),
                     }
@@ -298,14 +409,6 @@ class DDPGTrainer:
                     Path(log_dir) / "best_critic.pt",
                     {"episode": int(episode), "reward": float(episode_reward)},
                 )
-
-            # Evaluation
-            # if (episode + 1) % eval_freq == 0:
-            # eval_reward = self.evaluate()
-            # if logger:
-            #     logger.log({"eval_reward": eval_reward, "episode_length": step + 1})
-
-            # progress_bar.set_postfix({"episode": episode + 1, "eval_reward": f"{eval_reward:.2f}"})
 
             # Regular saving
             if log_dir and (episode + 1) % save_freq == 0:

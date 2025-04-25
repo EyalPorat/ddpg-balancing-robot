@@ -32,6 +32,12 @@ training:
   eval_episodes: 5
   save_frequency: 100
 
+  # Curriculum learning settings
+  use_curriculum: true
+  curriculum_epochs: 200
+  curriculum_initial_angle_range_precent: 0.1
+  curriculum_initial_angular_velocity_range_precent: 0.1
+
 # Logging parameters
 logging:
   log_frequency: 1

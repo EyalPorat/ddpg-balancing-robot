@@ -78,12 +78,11 @@ class PhysicsEngine:
         critical_velocity = 4.0  # rad/s
 
         # Calculate torque effectiveness based on angular velocity
-        # Effectiveness drops to zero at critical_velocity, then rises again beyond it
-        velocity_ratio = abs(theta_dot) / critical_velocity
+        # Effectiveness drops to zero at critical_velocity, and stays zero beyond that
+        velocity_ratio = min(abs(theta_dot), critical_velocity) / critical_velocity
 
         # This formula creates a parabola that equals 1 at velocity_ratio=0,
-        # drops to 0 at velocity_ratio=1 (critical_velocity),
-        # and increases again beyond that point
+        # drops to 0 at velocity_ratio=1 (critical_velocity) and stays at 0 beyond that
         torque_effectiveness = 1.0 - (2.0 * velocity_ratio) + (velocity_ratio**2)
 
         # Apply effectiveness to torque
