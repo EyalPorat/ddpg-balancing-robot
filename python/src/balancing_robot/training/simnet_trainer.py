@@ -216,10 +216,8 @@ class SimNetTrainer:
 
     def process_real_data(self, log_data: List[Dict[str, Any]]) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
         """Process real robot log data for training.
-
         Args:
             log_data: List of logged data dictionaries
-
         Returns:
             Tuple of (train_data, val_data) dictionaries
         """
@@ -227,7 +225,6 @@ class SimNetTrainer:
         actions = []
         next_states = []
         dt_factors = []  # To store the time difference ratio
-
         # Environment timestep (target)
         env_dt = 0.01  # 100Hz - the timestep used in simulation and control
 
@@ -256,17 +253,27 @@ class SimNetTrainer:
                 if dt_factor > 10.0:  # Arbitrary threshold, adjust as needed
                     continue
 
-                # Use theta, theta_dot, and previous motor command (normalized to [-1, 1])
-                prev_motor_command = float(current["motor_pwm"]) / 127.0  # Normalize to [-1, 1]  ##########################
+                # Get the previous motor command for current state
+                # For the first state in the sequence, we can't know what came before
+                # If i > 0, use the motor command from the previous timestep
+                # Otherwise, use the current motor command (not ideal but better than nothing)
+                if i > 0:
+                    prev_motor_command = float(episode_states[i - 1]["motor_pwm"]) / 127.0  # Normalize to [-1, 1]
+                else:
+                    # For the first state, we don't have a previous command
+                    # We could either skip this state or use the current command as an approximation
+                    prev_motor_command = float(current["motor_pwm"]) / 127.0  # This is a compromise
 
+                # Current state includes theta, theta_dot, and PREVIOUS motor command
                 state = np.array([current["theta"], current["theta_dot"], prev_motor_command])
 
-                next_motor_command = float(next_state["motor_pwm"]) / 127.0  # Normalize to [-1, 1]
+                # Current action is the motor command applied at the current timestep
+                action = np.array([current["motor_pwm"]]) / 127.0  # Normalize to [-1, 1]
 
-                next_state_array = np.array([next_state["theta"], next_state["theta_dot"], next_motor_command])
-
-                # Extract action and scale to [-1, 1]
-                action = np.array([current["motor_pwm"]]) / 127.0
+                # Next state includes next theta, next theta_dot, and CURRENT motor command
+                # (which becomes the "previous" command for the next timestep)
+                current_motor_command = float(current["motor_pwm"]) / 127.0
+                next_state_array = np.array([next_state["theta"], next_state["theta_dot"], current_motor_command])
 
                 states.append(state)
                 actions.append(action)
