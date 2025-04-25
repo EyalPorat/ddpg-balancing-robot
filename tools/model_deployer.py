@@ -33,29 +33,46 @@ class ModelDeployer:
     def export_network_weights(self, network: torch.nn.Module, filename: str):
         """Export network weights to binary format for embedded system."""
         with open(filename, "wb") as f:
-            # Export layer 1
-            weights = network.network[0].weight.data.cpu().numpy()
-            bias = network.network[0].bias.data.cpu().numpy()
+            # Export first hidden layer (L1)
+            first_layer = network.network[0]
+            weights = first_layer.weight.data.cpu().numpy()
+            bias = first_layer.bias.data.cpu().numpy()
 
             # Write L1 shape
-            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 10x2 for the new architecture
+            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 10x3 for the first layer
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
             # Write L1 LayerNorm parameters
-            f.write(network.network[1].weight.data.cpu().numpy().astype("float32").tobytes())
-            f.write(network.network[1].bias.data.cpu().numpy().astype("float32").tobytes())
+            layer_norm1 = network.network[1]
+            f.write(layer_norm1.weight.data.cpu().numpy().astype("float32").tobytes())  # gamma
+            f.write(layer_norm1.bias.data.cpu().numpy().astype("float32").tobytes())  # beta
 
-            # Export output layer (L2 in the new architecture)
+            # Export second hidden layer (L2)
+            second_layer = network.network[3]  # After ReLU
+            weights = second_layer.weight.data.cpu().numpy()
+            bias = second_layer.bias.data.cpu().numpy()
+
+            # Write L2 shape
+            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 10x10 for the second layer
+            f.write(weights.astype("float32").tobytes())
+            f.write(bias.astype("float32").tobytes())
+
+            # Write L2 LayerNorm parameters
+            layer_norm2 = network.network[4]
+            f.write(layer_norm2.weight.data.cpu().numpy().astype("float32").tobytes())  # gamma
+            f.write(layer_norm2.bias.data.cpu().numpy().astype("float32").tobytes())  # beta
+
+            # Export output layer (L3)
             weights = network.output_layer.weight.data.cpu().numpy()
             bias = network.output_layer.bias.data.cpu().numpy()
 
             # Write output layer shape
-            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))
+            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 1x10 for output layer
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
-            logger.info(f"Weight file created with structure: L1(10x3) -> L2(1x10)")
+            logger.info(f"Weight file created with structure: L1(10x3) -> L2(10x10) -> L3(1x10)")
 
     def verify_weights_file(self, filename: str) -> bool:
         """Verify exported weights file structure."""
@@ -76,15 +93,28 @@ class ModelDeployer:
                 # Skip LayerNorm
                 f.seek(rows * 4 * 2, 1)
 
-                # Verify L2 (output layer)
+                # Verify L2
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L2 shape: {rows}x{cols}")
 
+                # Second layer should be 10x10
+                if rows != 10 or cols != 10:
+                    raise ValueError(f"Invalid L2 shape: {rows}x{cols}, expected 10x10")
+
+                # Skip weights and biases
+                f.seek(rows * cols * 4 + rows * 4, 1)  # float32 = 4 bytes
+                # Skip LayerNorm
+                f.seek(rows * 4 * 2, 1)
+
+                # Verify L3 (output layer)
+                rows, cols = struct.unpack("II", f.read(8))
+                logger.info(f"L3 shape: {rows}x{cols}")
+
                 # Output layer should be 1x10
                 if rows != 1:
-                    raise ValueError(f"Invalid L2 shape: {rows}x{cols}, expected 1x10")
+                    raise ValueError(f"Invalid L3 shape: {rows}x{cols}, expected 1x10")
                 if cols != 10:
-                    raise ValueError(f"Invalid L2 shape: {rows}x{cols}, expected 1x10")
+                    raise ValueError(f"Invalid L3 shape: {rows}x{cols}, expected 1x10")
 
                 return True
 
@@ -137,8 +167,9 @@ def main():
     # Create model with 3D state input (includes prev_motor_command)
     # We always use max_action=1.0 for the actor, as actions are normalized to [-1, 1]
     # The scaling to actual PWM values happens in the embedded controller
-    actor = Actor(state_dim=3, action_dim=1, max_action=1.0, hidden_dims=(10,))
+    actor = Actor(state_dim=3, action_dim=1, max_action=1.0, hidden_dims=(10, 10))
 
+    # Load saved weights
     checkpoint = torch.load(args.model, map_location=torch.device("cpu"))
     actor.load_state_dict(checkpoint["state_dict"])
 

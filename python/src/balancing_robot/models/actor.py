@@ -13,14 +13,14 @@ class Actor(nn.Module):
     This typically results in smoother control and better policy generalization.
     """
 
-    def __init__(self, state_dim: int, action_dim: int, max_action: float, hidden_dims: Tuple[int, ...] = (8, 8)):
+    def __init__(self, state_dim: int, action_dim: int, max_action: float, hidden_dims: Tuple[int, ...] = (10, 10)):
         """Initialize actor network.
 
         Args:
             state_dim: Dimension of state space
             action_dim: Dimension of action space
             max_action: Maximum action value (for delta-based control, typically 1.0)
-            hidden_dims: Dimensions of hidden layers
+            hidden_dims: Dimensions of hidden layers (now two layers of 10 neurons each by default)
 
         Note:
             For delta-based control, the actor output represents a change in action,
