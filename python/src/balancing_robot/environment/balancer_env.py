@@ -104,12 +104,11 @@ class BalancerEnv(gym.Env):
                 "stillness": 5.0,
             }
 
-    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
+    def reset(self, seed: Optional[int] = None, should_zero_previous_action: bool = False) -> Tuple[np.ndarray, Dict]:
         """Reset environment to initial state.
 
         Args:
             seed: Random seed
-            options: Additional options (unused)
 
         Returns:
             Tuple of (observation, info)
@@ -118,19 +117,19 @@ class BalancerEnv(gym.Env):
 
         # Initialize with random angle and angular velocity
         theta_deg = self.np_random.uniform(-50, 50)  # theta in degrees
-        theta_dot_deg = self.np_random.uniform(-150, 150)  # theta_dot in degrees per second
-        prev_motor_command = self.np_random.uniform(-1.0, 1.0)  # Random initial motor command
+        theta_dot_dps = self.np_random.uniform(-150, 150)  # theta_dot in degrees per second
+        random_motor_command = self.np_random.uniform(-1.0, 1.0)  # Random initial motor command
+        prev_motor_command = 0.0 if should_zero_previous_action else random_motor_command
 
         self.state = np.array(
             [
                 np.deg2rad(theta_deg),  # Convert theta to radians
-                np.deg2rad(theta_dot_deg),  # Convert theta_dot to radians per second
-                # 0.0,  # Initialize previous motor command to zero
+                np.deg2rad(theta_dot_dps),  # Convert theta_dot to radians per second
                 prev_motor_command,  # Use random initial motor command
             ]
         )
 
-        self.prev_action = 0.0
+        self.prev_action = prev_motor_command  # Store the initial motor command
         self.steps = 0
 
         if self.render_mode == "human":
@@ -331,13 +330,6 @@ class BalancerEnv(gym.Env):
             return abs(theta) > term_config["max_angle"]
         else:
             return abs(theta) > np.pi / 3
-
-    def render(self):
-        """Render the environment."""
-        if self.render_mode == "human":
-            return self._render_frame()
-
-        return None
 
     def _render_frame(self):
         """Render one frame of the environment."""

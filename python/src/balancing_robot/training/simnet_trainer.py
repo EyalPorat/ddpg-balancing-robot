@@ -114,7 +114,7 @@ class SimNetTrainer:
         2. Taking no action Episodes (letting the system fall on its own)
         3. Taking random action episodes (with noise)
         4. Adding observation noise to increase robustness
-        5. Breaking on 'done' for noise-included episodes
+        5. Breaking on 'done'
         """
         config = self.config["data_collection"]
         num_samples = config["physics_samples"]
@@ -136,10 +136,10 @@ class SimNetTrainer:
         # (1) "No action" episodes
         for _ in tqdm(range(no_action_episodes), desc="Collecting no-action physics data"):
             # Reset environment
-            state, _ = self.env.reset()
+            state, _ = self.env.reset(should_zero_previous_action=True)
 
-            # Add initial observation noise
-            state = state + np.random.normal(0, observation_noise_std, size=state.shape)
+            # Add initial observation noise only to physical components (theta, theta_dot)
+            state[:2] = state[:2] + np.random.normal(0, observation_noise_std, size=2)
 
             for _ in range(steps_per_episode):
                 s_t = state.copy()
