@@ -174,7 +174,7 @@ class SimNetTrainer:
                 # Add action noise to increase exploration
                 a_t = np.clip(a_t + np.random.normal(0, action_noise_std, size=self.env.action_space.shape), -1, 1)
 
-                next_state, _, done, _, _ = self.env.step(a_t)
+                next_state, _, done, _, _ = self.env.step(a_t, action_as_actual_output=True)
 
                 # Add observation noise to next_state (only to physical components)
                 next_state[:2] = next_state[:2] + np.random.normal(0, observation_noise_std, size=2)
@@ -257,7 +257,7 @@ class SimNetTrainer:
                     continue
 
                 # Use theta, theta_dot, and previous motor command (normalized to [-1, 1])
-                prev_motor_command = float(current["motor_pwm"]) / 127.0  # Normalize to [-1, 1]
+                prev_motor_command = float(current["motor_pwm"]) / 127.0  # Normalize to [-1, 1]  ##########################
 
                 state = np.array([current["theta"], current["theta_dot"], prev_motor_command])
 

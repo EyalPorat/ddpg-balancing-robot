@@ -137,11 +137,12 @@ class BalancerEnv(gym.Env):
 
         return self.state, {}
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict]:
+    def step(self, action: np.ndarray, action_as_actual_output: bool = False) -> Tuple[np.ndarray, float, bool, bool, Dict]:
         """Execute one environment step with delta-based action.
 
         Args:
             action: Action to take (delta in motor command, scaled to [-1, 1])
+            action_as_actual_output: If True, action is treated as the actual motor command (not delta)
 
         Returns:
             Tuple of (observation, reward, terminated, truncated, info)
@@ -154,6 +155,11 @@ class BalancerEnv(gym.Env):
 
         # Apply delta to previous command and clip to valid range
         new_motor_command = np.clip(prev_motor_command + delta, -1.0, 1.0)
+
+        # If action is treated as actual output, use it directly
+        if action_as_actual_output:
+            new_motor_command = np.clip(action, -1.0, 1.0)
+
 
         # Scale the motor command to actual torque
         # This is the only place where max_torque is used - to convert normalized [-1, 1] to physical torque

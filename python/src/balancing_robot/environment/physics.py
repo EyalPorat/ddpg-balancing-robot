@@ -60,26 +60,38 @@ class PhysicsEngine:
 
     def get_acceleration(self, state: np.ndarray, torque: np.ndarray) -> float:
         """Calculate system accelerations based on current state and applied torque.
-
         Args:
             state: System state [theta, theta_dot]
             torque: Applied motor torque
-
         Returns:
             Angular acceleration (theta_ddot)
         """
-
         # Extract state components
         theta = state[0]
+        theta_dot = state[1]
         p = self.params
 
         # Calculate static friction effects
         max_static_friction = self.calculate_static_friction_threshold()
 
-        # If no torque, check static friction
-        if abs(torque.item()) < p.motor_deadzone:
-            required_friction = abs(p.M * p.g * p.l * np.sin(theta))
+        # Define critical angular velocity where torque effectiveness is zero
+        critical_velocity = 4.0  # rad/s
 
+        # Calculate torque effectiveness based on angular velocity
+        # Effectiveness drops to zero at critical_velocity, then rises again beyond it
+        velocity_ratio = abs(theta_dot) / critical_velocity
+
+        # This formula creates a parabola that equals 1 at velocity_ratio=0,
+        # drops to 0 at velocity_ratio=1 (critical_velocity),
+        # and increases again beyond that point
+        torque_effectiveness = 1.0 - (2.0 * velocity_ratio) + (velocity_ratio**2)
+
+        # Apply effectiveness to torque
+        effective_torque = torque.item() * torque_effectiveness
+
+        # If no effective torque, check static friction
+        if abs(effective_torque) < p.motor_deadzone:
+            required_friction = abs(p.M * p.g * p.l * np.sin(theta))
             if required_friction <= max_static_friction:
                 # Static friction keeps system rigid
                 I_total = p.M * p.l**2 + p.I + 2 * (p.m * p.r**2 + p.i)
@@ -89,28 +101,21 @@ class PhysicsEngine:
                 theta_ddot = (p.M * p.g * p.l * np.sin(theta)) / (p.M * p.l**2 + p.I)
         else:
             # Normal dynamics with applied torque, assuming fixed base (no x movement)
-            theta_ddot = (p.M * p.g * p.l * np.sin(theta) - torque.item()) / (p.M * p.l**2 + p.I)
+            theta_ddot = (p.M * p.g * p.l * np.sin(theta) - effective_torque) / (p.M * p.l**2 + p.I)
 
         return theta_ddot
 
     def integrate_state(self, state: np.ndarray, theta_ddot: float) -> np.ndarray:
-        """Integrate state using semi-implicit Euler method.
-
-        Args:
-            state: Current state [theta, theta_dot]
-            theta_ddot: Calculated angular acceleration
-
-        Returns:
-            Updated state array [theta, theta_dot]
-        """
+        """Integrate state using semi-implicit Euler method."""
         # Extract components
         theta, theta_dot = state[0], state[1]
-
-        # Semi-implicit Euler integration
         dt = self.params.dt
 
-        # Update velocity
+        # Semi-implicit Euler integration
         theta_dot_new = theta_dot + theta_ddot * dt
+
+        # Add constraint on angular velocity (missing in current code)
+        theta_dot_new = np.clip(theta_dot_new, -8.0, 8.0)  # Limit to reasonable values
 
         # Update position
         theta_new = theta + theta_dot_new * dt
