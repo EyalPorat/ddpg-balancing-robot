@@ -306,7 +306,7 @@ class BalancerEnv(gym.Env):
 
         # New stillness reward that activates near the balanced position
         stillness_reward = 0
-        angle_threshold = np.deg2rad(10)  # Angle threshold for stillness reward
+        angle_threshold = np.deg2rad(3)  # Angle threshold for stillness reward
         if abs(theta) < angle_threshold:
             # Reward is highest when both angle and angular velocity are zero
             # and decreases as either increases

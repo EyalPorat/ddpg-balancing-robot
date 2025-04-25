@@ -761,7 +761,7 @@ class ModelAnalyzer:
         # Simulate trajectory for each initial condition
         for theta, theta_dot, label in initial_conditions:
             # Initialize state
-            state = np.array([theta, theta_dot])
+            state = np.array([theta, theta_dot, 0.0])  # prev_action = 0.0
 
             # Initialize trajectory
             trajectory = {"label": label, "states": [state.copy()], "actions": [], "time": [0.0]}
@@ -770,14 +770,17 @@ class ModelAnalyzer:
             current_time = 0.0
             for _ in range(max_steps):
                 # Get action
-                action = self.predict_actions([state])[0][0]
+                action = self.predict_actions([state])[0]
 
                 # Store action
-                trajectory["actions"].append(action)
+                trajectory["actions"].append(action[0])
 
-                # Update state using physics model
-                accel = self.env.physics.get_acceleration(state, action)
-                next_state = self.env.physics.integrate_state(state, accel)
+                # # Update state using physics model
+                # accel = self.env.physics.get_acceleration(state, action)
+                # next_state = self.env.physics.integrate_state(state, accel)
+
+                # Update state using SimNet
+                next_state = self.predict_next_state_simnet(state, action)
 
                 # Update time
                 current_time += self.env.physics.params.dt
