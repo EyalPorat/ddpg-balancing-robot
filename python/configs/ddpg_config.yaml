@@ -1,4 +1,4 @@
-# DDPG Training Configuration
+# Enhanced DDPG Training Configuration with Dual Prioritized Replay
 
 # Model parameters
 model:
@@ -19,8 +19,25 @@ training:
   tau: 0.005   # Target network update rate
   
   # Experience replay settings
-  buffer_size: 1000000
-  min_buffer_size: 5000  # Minimum samples before training starts
+  buffer_size: 1000
+  min_buffer_size: 500  # Minimum samples before training starts
+  
+  # Dual Prioritized Replay Buffer settings
+  use_critic_prioritization: true
+  use_actor_prioritization: true
+  critic_alpha: 0.6  # Priority exponent for critic (higher = more prioritization)
+  actor_alpha: 0.6   # Priority exponent for actor
+  critic_beta_start: 0.4  # Initial importance sampling correction for critic
+  actor_beta_start: 0.4   # Initial importance sampling correction for actor
+  beta_anneal_steps: 500  # Steps to anneal beta from start value to 1.0
+  
+  # Actor prioritization method
+  # Options: 'q_value', 'advantage', 'policy_gradient'
+  actor_priority_method: "q_value"
+  advantage_samples: 10  # Number of random samples for advantage calculation
+  
+  # Buffer management
+  shared_transitions: true  # Whether to store all transitions in both buffers
   
   # Exploration settings
   action_noise: 0.1
