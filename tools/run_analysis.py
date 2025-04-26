@@ -21,7 +21,7 @@ def main():
         "--type",
         type=str,
         default="all",
-        choices=["all", "basic", "performance", "comparison", "trajectory"],
+        choices=["all", "basic", "performance", "comparison", "trajectory", "trajectory_heatmap_overlay"],
         help="Type of analysis to run",
     )
     parser.add_argument("--device", type=str, default="cpu", help="Device to run on (cpu/cuda)")
@@ -55,12 +55,14 @@ def main():
         analyzer.create_phase_space_plot()
     elif args.type == "performance":
         analyzer.analyze_simulated_trajectories()
+        analyzer.create_trajectory_heatmap_overlay()
         analyzer.analyze_stability_regions()
     elif args.type == "comparison":
         analyzer.generate_comparative_pd_controller()
     elif args.type == "trajectory":
         analyzer.analyze_simulated_trajectories()
-
+    elif args.type == "trajectory_heatmap_overlay":
+        analyzer.create_trajectory_heatmap_overlay()
 
     print(f"Analysis complete. Results saved to {args.output}")
     print(f"Open {output_dir / 'analysis_summary.html'} in a browser to view results")

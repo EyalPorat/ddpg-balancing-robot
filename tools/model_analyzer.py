@@ -693,6 +693,97 @@ class ModelAnalyzer:
 
         print("Controller comparison completed and saved.")
 
+    def create_trajectory_heatmap_overlay(self, prev_cmd=0.0, max_steps=200, grid_size=10):
+        """Plot action‐heatmap with colored trajectories, arrows, and start/end markers."""
+        import matplotlib as mpl
+
+        # — 1) Heatmap background
+        theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
+        states3 = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten(), np.ones(theta_mesh.size) * prev_cmd))
+        action_mesh = self.predict_actions(states3).reshape(theta_mesh.shape)
+
+        fig, ax = plt.subplots(figsize=(12, 10))
+        theta_deg = self.theta_range * 180.0 / np.pi
+
+        hm = ax.pcolormesh(theta_deg, self.theta_dot_range, action_mesh, cmap="coolwarm", shading="gouraud", alpha=0.7)
+        cbar = fig.colorbar(hm, ax=ax, pad=0.02)
+        cbar.set_label("Action (norm. –1…1)", rotation=270, labelpad=15)
+
+        # Zero-action contour
+        ax.contour(
+            theta_deg,
+            self.theta_dot_range,
+            action_mesh,
+            levels=[0],
+            colors="white",
+            linestyles="--",
+            linewidths=1.5,
+            alpha=0.7,
+        )
+
+        # — 2) Trajectory starts on a grid
+        θ_min, θ_max = theta_deg.min(), theta_deg.max()
+        ω_min, ω_max = self.theta_dot_range.min(), self.theta_dot_range.max()
+
+        thetas0 = np.linspace(self.theta_range.min(), self.theta_range.max(), grid_size)
+        ωs0 = np.linspace(self.theta_dot_range.min(), self.theta_dot_range.max(), grid_size)
+        starts = [(θ0, ω0) for θ0 in thetas0 for ω0 in ωs0]
+
+        cmap = mpl.cm.get_cmap("tab10")
+        for idx, (θ0, ω0) in enumerate(starts):
+            color = cmap(idx % cmap.N)
+            traj = []
+            state, _ = self.env.reset(state=np.array([θ0, ω0, prev_cmd]))
+            for _ in range(max_steps):
+                ang_d = state[0] * 180.0 / np.pi
+                vel = state[1]
+                if not (θ_min <= ang_d <= θ_max and ω_min <= vel <= ω_max):
+                    break
+                traj.append((ang_d, vel))
+                action = self.predict_actions([state])[0]
+                state, _, _, _, _ = self.env.step(action)
+
+            if len(traj) < 2:
+                continue
+
+            xs, ys = zip(*traj)
+            ax.plot(xs, ys, color=color, lw=1.5, alpha=0.8)
+
+            # arrows at regular intervals
+            N = max(1, len(xs) // 8)
+            ax.quiver(
+                xs[:-1:N],
+                ys[:-1:N],
+                np.diff(xs)[::N],
+                np.diff(ys)[::N],
+                angles="xy",
+                scale_units="xy",
+                scale=1,
+                width=0.003,
+                color=color,
+                alpha=0.8,
+            )
+
+            # start/end markers
+            ax.scatter(xs[0], ys[0], marker="o", color=color, edgecolor="k", s=50, zorder=5)
+            ax.scatter(xs[-1], ys[-1], marker=">", color=color, s=40, zorder=5)
+
+        # — 3) Final styling
+        ax.set_axisbelow(True)
+        ax.grid(color="white", linestyle="--", linewidth=0.5, alpha=0.5)
+
+        for spine in ["top", "right"]:
+            ax.spines[spine].set_visible(False)
+
+        ax.set_xlabel("Angle θ (deg)")
+        ax.set_ylabel("Angular Velocity θ̇ (rad/s)")
+        ax.set_title(f"Action Heatmap (prev_cmd={prev_cmd}) with Trajectories")
+
+        plt.tight_layout()
+        plt.savefig(self.output_dir / f"traj_over_heatmap_prev_cmd_{prev_cmd}.png", dpi=300)
+        plt.close(fig)
+        print("Trajectory-overlay heatmap saved.")
+
     def run_complete_analysis(self):
         """Run all analysis methods."""
         self.create_action_heatmaps_for_multiple_prev_cmds()
@@ -700,6 +791,7 @@ class ModelAnalyzer:
         self.create_3d_action_surface()
         self.analyze_stability_regions()
         self.analyze_simulated_trajectories()
+        self.create_trajectory_heatmap_overlay(prev_cmd=0.0)
         self.generate_comparative_pd_controller()
 
         print("\nComplete analysis finished. Results saved to:", self.output_dir)
@@ -821,15 +913,7 @@ def main():
         "--analysis",
         type=str,
         default="all",
-        choices=[
-            "all",
-            "heatmap",
-            "phase",
-            "surface",
-            "stability",
-            "trajectory",
-            "pd",
-        ],
+        choices=["all", "heatmap", "phase", "surface", "stability", "trajectory", "pd", "trajectory_heatmap_overlay"],
         help="Specific analysis to run",
     )
 
@@ -851,6 +935,8 @@ def main():
         analyzer.analyze_simulated_trajectories()
     elif args.analysis == "pd":
         analyzer.generate_comparative_pd_controller()
+    elif args.analysis == "trajectory_heatmap_overlay":
+        analyzer.create_trajectory_heatmap_overlay(prev_cmd=0.0)
 
 
 if __name__ == "__main__":

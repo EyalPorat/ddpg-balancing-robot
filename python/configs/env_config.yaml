@@ -39,13 +39,13 @@ reward:
   # angle_decay: 15.0
 
   "angle": 5.0
-  "direction": 7.5
-  "stillness": 150.0
+  "direction": 10.0
+  "stillness": 50.0
   "angular_velocity": 1.0
   "angle_decay": 30.0
   "reached_stable_bonus": 0.0
-  "far_from_center_penalty": 40.0
-  "angular_vel_far_from_center_penalty": 69.0
+  "far_from_center_penalty": 0.0
+  "angular_vel_far_from_center_penalty": 10.0
 
 # Episode termination
 termination:
