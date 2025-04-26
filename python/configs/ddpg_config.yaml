@@ -3,7 +3,7 @@
 # Model parameters
 model:
   actor:
-    hidden_dims: [10, 10]
+    hidden_dims: [10]
     learning_rate: 0.0001
     
   critic:
@@ -33,7 +33,7 @@ training:
   save_frequency: 100
 
   # Curriculum learning settings
-  use_curriculum: true
+  use_curriculum: false
   curriculum_epochs: 200
   curriculum_initial_angle_range_precent: 0.1
   curriculum_initial_angular_velocity_range_precent: 0.1
