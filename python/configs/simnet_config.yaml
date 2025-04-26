@@ -30,8 +30,8 @@ training:
 
   # Real-data fine-tuning
   finetune:
-    learning_rate: 0.000005
-    epochs: 10
+    learning_rate: 0.00001
+    epochs: 20
     batch_size: 128
     early_stopping_patience: 5
     reduce_lr_patience: 3
