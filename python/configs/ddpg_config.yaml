@@ -1,4 +1,4 @@
-# Enhanced DDPG Training Configuration with Dual Prioritized Replay
+# Enhanced DDPG Training Configuration with Policy Gradient Prioritized Replay
 
 # Model parameters
 model:
@@ -25,16 +25,13 @@ training:
   # Dual Prioritized Replay Buffer settings
   use_critic_prioritization: true
   use_actor_prioritization: true
+  actor_prioritization_start_episode: 400
+  
   critic_alpha: 0.6  # Priority exponent for critic (higher = more prioritization)
   actor_alpha: 0.6   # Priority exponent for actor
   critic_beta_start: 0.4  # Initial importance sampling correction for critic
   actor_beta_start: 0.4   # Initial importance sampling correction for actor
   beta_anneal_steps: 500  # Steps to anneal beta from start value to 1.0
-  
-  # Actor prioritization method
-  # Options: 'q_value', 'advantage', 'policy_gradient'
-  actor_priority_method: "q_value"
-  advantage_samples: 10  # Number of random samples for advantage calculation
   
   # Buffer management
   shared_transitions: true  # Whether to store all transitions in both buffers

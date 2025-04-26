@@ -99,18 +99,16 @@ class DDPGTrainer:
             "shared_transitions", True
         )  # Whether to store transitions in both buffers
 
+        # Episode counter for actor prioritization delay
+        self.current_episode = 0
+        self.actor_prioritization_start_episode = train_config.get("actor_prioritization_start_episode", 100)
+
         # Training parameters
         self.gamma = train_config["gamma"]
         self.tau = train_config["tau"]
         self.action_noise = train_config["action_noise"]
         self.noise_decay = train_config["noise_decay"]
         self.min_noise = train_config["min_noise"]
-
-        # Actor prioritization method (options: 'q_value', 'advantage', 'policy_gradient')
-        self.actor_priority_method = train_config.get("actor_priority_method", "q_value")
-
-        # Parameter for advantage calculation if using that method
-        self.advantage_samples = train_config.get("advantage_samples", 10)
 
         # Beta annealing for importance sampling (starts lower, approaches 1)
         self.critic_beta_start = train_config.get("critic_beta_start", 0.4)
@@ -171,13 +169,12 @@ class DDPGTrainer:
                 "curriculum_initial_angular_velocity_range_precent": 0.2,
                 "use_critic_prioritization": True,
                 "use_actor_prioritization": True,
+                "actor_prioritization_start_episode": 100,
                 "critic_alpha": 0.6,
                 "actor_alpha": 0.6,
                 "critic_beta_start": 0.4,
                 "actor_beta_start": 0.4,
                 "beta_anneal_steps": 50000,
-                "actor_priority_method": "q_value",
-                "advantage_samples": 10,
                 "shared_transitions": True,
             },
         }
@@ -246,7 +243,7 @@ class DDPGTrainer:
             self.actor_buffer.push(state, action, reward, next_state, done)
 
     def _calculate_actor_priorities(self, states: torch.Tensor, actor_actions: torch.Tensor) -> np.ndarray:
-        """Calculate priorities for the actor replay buffer.
+        """Calculate priorities for the actor replay buffer using policy gradient magnitudes.
 
         Args:
             states: Batch of states
@@ -255,68 +252,29 @@ class DDPGTrainer:
         Returns:
             Array of priority values for each state-action pair
         """
-        if self.actor_priority_method == "q_value":
-            # Prioritize states where the actor's action has a low Q-value
-            # (meaning there's a lot of room for improvement)
-            with torch.no_grad():
-                q_values = self.critic(states, actor_actions)
-                # Invert Q-values - lower Q-values get higher priority
-                priorities = -q_values.detach().cpu().numpy().squeeze()
-                return priorities + 1e-6  # Add small constant for numerical stability
+        # Enable gradient computation for actions
+        actions_with_grad = actor_actions.clone().detach().requires_grad_(True)
 
-        elif self.actor_priority_method == "advantage":
-            # Prioritize states where the advantage (current action vs random actions) is large
-            with torch.no_grad():
-                # Get Q-value for current policy's action
-                policy_q = self.critic(states, actor_actions)
+        # Compute Q-values
+        q_values = self.critic(states, actions_with_grad)
 
-                # Sample random actions and get their Q-values
-                random_qs = []
-                for _ in range(self.advantage_samples):
-                    random_actions = torch.FloatTensor(
-                        np.random.uniform(-1, 1, size=(states.size(0), actor_actions.size(1)))
-                    ).to(self.device)
-                    random_q = self.critic(states, random_actions)
-                    random_qs.append(random_q)
+        # We want to maximize Q-values, so negate for gradient descent
+        loss = -q_values.mean()
 
-                # Calculate the mean Q-value of random actions
-                mean_random_q = torch.stack(random_qs).mean(dim=0)
+        # Compute gradients of Q-values with respect to actions
+        self.critic.zero_grad()
+        loss.backward(retain_graph=True)
 
-                # Calculate advantage (how much better is the policy than random)
-                advantage = policy_q - mean_random_q
+        # The gradient magnitude shows how much the action affects Q-value
+        action_gradients = actions_with_grad.grad
 
-                # Use the absolute advantage for prioritization
-                # Large absolute advantage means this state is important for learning
-                priorities = torch.abs(advantage).detach().cpu().numpy().squeeze()
-                return priorities + 1e-6
+        # Higher gradient magnitude means the state is more important for learning
+        gradient_magnitudes = torch.norm(action_gradients, dim=1)
 
-        elif self.actor_priority_method == "policy_gradient":
-            # Prioritize states with large policy gradient magnitudes
-            self.actor_optimizer.zero_grad()
-            q_values = self.critic(states, actor_actions)
-            actor_loss = -q_values.mean()
-            actor_loss.backward(retain_graph=True)
+        # Convert to priorities (add small constant for numerical stability)
+        priorities = gradient_magnitudes.detach().cpu().numpy() + 1e-6
 
-            # Calculate the norm of gradients for each state-action pair
-            # This is a bit tricky since the gradients are for the network parameters
-            # We'll use a proxy based on the sensitivity of Q-values to actions
-            with torch.no_grad():
-                # Make a small perturbation to actions
-                epsilon = 1e-3
-                perturbed_actions = actor_actions.clone() + epsilon
-                perturbed_actions = torch.clamp(perturbed_actions, -1.0, 1.0)
-
-                # Get Q-values for perturbed actions
-                perturbed_q = self.critic(states, perturbed_actions)
-
-                # Sensitivity is approximated by the change in Q-value
-                sensitivity = torch.abs(perturbed_q - q_values) / epsilon
-                priorities = sensitivity.detach().cpu().numpy().squeeze()
-                return priorities + 1e-6
-
-        else:
-            # Default to uniform priorities if method not recognized
-            return np.ones(states.size(0))
+        return priorities
 
     def train_step(self, batch_size: int) -> Dict[str, float]:
         """Perform one training step with dual prioritized experience replay."""
@@ -373,14 +331,19 @@ class DDPGTrainer:
             self.critic_buffer.update_priorities(critic_indices, new_critic_priorities)
 
         # ACTOR UPDATE
-        # Sample from actor replay buffer (which may be different from critic's sample)
-        if self.use_actor_prioritization:
+        # Check if actor prioritization should be used based on episode count
+        use_actor_prioritization = (
+            self.use_actor_prioritization and self.current_episode >= self.actor_prioritization_start_episode
+        )
+
+        # Sample from actor replay buffer
+        if use_actor_prioritization:
             actor_sample = self.actor_buffer.sample(batch_size=batch_size, beta=actor_beta)
             actor_states, actor_actions_old, _, _, _, actor_weights, actor_indices = actor_sample
             actor_states = torch.FloatTensor(actor_states).to(self.device)
             actor_weights = torch.FloatTensor(actor_weights).to(self.device)
         else:
-            # If not using separate actor prioritization, use the same states as critic
+            # If not using actor prioritization, use the same states as critic
             actor_states = states
             actor_weights = torch.ones(batch_size).to(self.device)
             actor_indices = None
@@ -397,8 +360,8 @@ class DDPGTrainer:
         actor_loss.backward()
         self.actor_optimizer.step()
 
-        # Update actor priorities based on the chosen method
-        if self.use_actor_prioritization and actor_indices is not None:
+        # Update actor priorities based on policy gradient
+        if use_actor_prioritization and actor_indices is not None:
             new_actor_priorities = self._calculate_actor_priorities(actor_states, actor_actions)
             self.actor_buffer.update_priorities(actor_indices, new_actor_priorities)
 
@@ -414,6 +377,7 @@ class DDPGTrainer:
             "action_noise": float(self.action_noise * (self.noise_decay**self.training_steps)),
             "critic_beta": float(critic_beta),
             "actor_beta": float(actor_beta),
+            "actor_prioritization_active": use_actor_prioritization,
         }
 
         if self.use_critic_prioritization:
@@ -424,7 +388,7 @@ class DDPGTrainer:
                 }
             )
 
-        if self.use_actor_prioritization:
+        if use_actor_prioritization:
             metrics.update(
                 {
                     "actor_priority_mean": float(np.mean(new_actor_priorities)),
@@ -465,6 +429,9 @@ class DDPGTrainer:
         progress_bar = tqdm(range(num_episodes), desc="Training", position=0, leave=True)
 
         for episode in progress_bar:
+            # Update current episode counter
+            self.current_episode = episode
+
             # Calculate initialization ranges based on curriculum
             theta_range, theta_dot_range = self._calculate_curriculum_ranges(episode)
 
@@ -545,6 +512,8 @@ class DDPGTrainer:
                         ),
                         "critic_buffer_size": len(self.critic_buffer),
                         "actor_buffer_size": len(self.actor_buffer),
+                        "current_episode": self.current_episode,
+                        "actor_prioritization_active": self.current_episode >= self.actor_prioritization_start_episode,
                     }
                 )
 
@@ -557,6 +526,9 @@ class DDPGTrainer:
                             f"{min(100, int(episode * 100 / self.curriculum_epochs))}%"
                             if self.use_curriculum and episode < self.curriculum_epochs
                             else "done"
+                        ),
+                        "actor_prio": (
+                            "on" if self.current_episode >= self.actor_prioritization_start_episode else "off"
                         ),
                         "actor_loss": (
                             f"{logger.get_latest('actor_loss'):.4f}"
