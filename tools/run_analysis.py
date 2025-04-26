@@ -51,7 +51,6 @@ def main():
     if args.type == "all":
         analyzer.run_complete_analysis()
     elif args.type == "basic":
-        analyzer.analyze_response_curves()
         analyzer.create_action_heatmap()
         analyzer.create_phase_space_plot()
     elif args.type == "performance":
@@ -59,7 +58,6 @@ def main():
         analyzer.analyze_stability_regions()
     elif args.type == "comparison":
         analyzer.generate_comparative_pd_controller()
-        analyzer.analyze_controller_nonlinearity()
     elif args.type == "trajectory":
         analyzer.analyze_simulated_trajectories()
 

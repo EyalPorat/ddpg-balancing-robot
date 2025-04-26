@@ -130,61 +130,6 @@ class ModelAnalyzer:
             actions = self.actor(states_tensor).cpu().numpy()
         return actions
 
-    def analyze_response_curves(self):
-        """Analyze controller response to varying state inputs."""
-        print("Analyzing response curves...")
-
-        # Response to theta (with theta_dot = 0 and prev_motor_command = 0)
-        theta_states = np.array([[theta, 0.0, 0.0] for theta in self.theta_range])
-        theta_actions = self.predict_actions(theta_states)
-
-        # Response to theta_dot (with theta = 0 and prev_motor_command = 0)
-        theta_dot_states = np.array([[0.0, theta_dot, 0.0] for theta_dot in self.theta_dot_range])
-        theta_dot_actions = self.predict_actions(theta_dot_states)
-
-        # Response to prev_motor_command (with theta = 0 and theta_dot = 0)
-        prev_cmd_range = np.linspace(-1.0, 1.0, 100)
-        prev_cmd_states = np.array([[0.0, 0.0, prev_cmd] for prev_cmd in prev_cmd_range])
-        prev_cmd_actions = self.predict_actions(prev_cmd_states)
-
-        # Plot theta response
-        plt.figure(figsize=(10, 6))
-        plt.plot(self.theta_range * 180 / np.pi, theta_actions)
-        plt.grid(True)
-        plt.xlabel("Angle θ (degrees)")
-        plt.ylabel("Action (normalized [-1, 1])")
-        plt.title("Controller Response to Body Angle")
-        plt.axhline(y=0, color="r", linestyle="--", alpha=0.3)
-        plt.axvline(x=0, color="r", linestyle="--", alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(self.output_dir / "theta_response.png")
-
-        # Plot theta_dot response
-        plt.figure(figsize=(10, 6))
-        plt.plot(self.theta_dot_range, theta_dot_actions)
-        plt.grid(True)
-        plt.xlabel("Angular Velocity θ̇ (rad/s)")
-        plt.ylabel("Action (normalized [-1, 1])")
-        plt.title("Controller Response to Angular Velocity")
-        plt.axhline(y=0, color="r", linestyle="--", alpha=0.3)
-        plt.axvline(x=0, color="r", linestyle="--", alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(self.output_dir / "theta_dot_response.png")
-
-        # Plot prev_motor_command response
-        plt.figure(figsize=(10, 6))
-        plt.plot(prev_cmd_range, prev_cmd_actions)
-        plt.grid(True)
-        plt.xlabel("Previous Motor Command (normalized [-1, 1])")
-        plt.ylabel("Action (normalized [-1, 1])")
-        plt.title("Controller Response to Previous Motor Command")
-        plt.axhline(y=0, color="r", linestyle="--", alpha=0.3)
-        plt.axvline(x=0, color="r", linestyle="--", alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(self.output_dir / "prev_cmd_response.png")
-
-        print("Response curves analyzed and saved.")
-
     def create_action_heatmap(self, prev_cmd=0.0):
         """Create heatmap of actions across the state space for a fixed previous command value."""
         print(f"Creating action heatmap (prev_cmd={prev_cmd})...")
@@ -409,7 +354,9 @@ class ModelAnalyzer:
         for i, theta in enumerate(tqdm(thetas, desc="Simulating trajectories")):
             for j, theta_dot in enumerate(theta_dots):
                 # Initialize state with a full 3-element vector for SimNet
-                state, _ = self.env.reset(state=np.array([theta, theta_dot, 0.0]))  # Reset environment to the current state
+                state, _ = self.env.reset(
+                    state=np.array([theta, theta_dot, 0.0])
+                )  # Reset environment to the current state
 
                 # Keep track of last 10 theta_dot values
                 theta_dot_history = [theta_dot] * 2  # Initialize with initial value
@@ -478,222 +425,6 @@ class ModelAnalyzer:
         plt.savefig(self.output_dir / "steps_to_stabilize.png", dpi=300)
 
         print("Stability analysis completed and saved.")
-
-    def analyze_sensitivity(self):
-        """Analyze controller sensitivity to small changes in input."""
-        print("Analyzing controller sensitivity...")
-
-        # Sample states in balanced region
-        center_theta = 0.0
-        center_theta_dot = 0.0
-
-        # Create small perturbations around balanced state
-        delta = 0.05  # radians/rad per second
-        n_samples = 100
-
-        delta_theta = np.linspace(-5 * delta, 5 * delta, n_samples)
-        delta_theta_dot = np.linspace(-5 * delta, 5 * delta, n_samples)
-
-        # Create mesh grid for perturbations
-        delta_theta_mesh, delta_theta_dot_mesh = np.meshgrid(delta_theta, delta_theta_dot)
-
-        # Calculate perturbed states
-        theta_mesh = center_theta + delta_theta_mesh
-        theta_dot_mesh = center_theta_dot + delta_theta_dot_mesh
-
-        # Prepare states for prediction (include zero prev_action)
-        states = np.column_stack(
-            (
-                theta_mesh.flatten(),
-                theta_dot_mesh.flatten(),
-                np.zeros(theta_mesh.size),  # Initialize prev_action to zero
-            )
-        )
-
-        # Predict actions
-        actions = self.predict_actions(states)
-        action_mesh = actions.reshape(theta_mesh.shape)
-
-        # Calculate gradients
-        d_action_d_theta = np.gradient(action_mesh, delta_theta, axis=1)
-        d_action_d_theta_dot = np.gradient(action_mesh, delta_theta_dot, axis=0)
-
-        # Calculate sensitivity magnitude
-        sensitivity = np.sqrt(d_action_d_theta**2 + d_action_d_theta_dot**2)
-
-        # Plot sensitivity heatmap
-        plt.figure(figsize=(12, 10))
-
-        # Convert theta to degrees for readability
-        theta_degrees = theta_mesh * 180 / np.pi
-
-        plt.pcolormesh(theta_degrees, theta_dot_mesh, sensitivity, cmap="viridis", shading="auto")
-
-        plt.colorbar(label="Sensitivity Magnitude")
-        plt.xlabel("Angle θ (degrees)")
-        plt.ylabel("Angular Velocity θ̇ (rad/s)")
-        plt.title("Controller Sensitivity")
-        plt.axhline(y=0, color="k", linestyle="--", alpha=0.3)
-        plt.axvline(x=0, color="k", linestyle="--", alpha=0.3)
-        plt.grid(alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(self.output_dir / "sensitivity.png", dpi=300)
-
-        print("Sensitivity analysis completed and saved.")
-
-    def create_response_curves_family(self):
-        """Create a family of response curves for varying angles and angular velocities."""
-        print("Creating response curve families...")
-
-        # Theta response curves for different angular velocities
-        plt.figure(figsize=(12, 8))
-
-        theta_dot_values = [-3.0, -1.5, 0.0, 1.5, 3.0]
-
-        for theta_dot in theta_dot_values:
-            states = np.array([[theta, theta_dot, 0.0] for theta in self.theta_range])
-            actions = self.predict_actions(states)
-
-            plt.plot(self.theta_range * 180 / np.pi, actions, label=f"θ̇ = {theta_dot} rad/s")
-
-        plt.grid(True)
-        plt.axhline(y=0, color="r", linestyle="--", alpha=0.3)
-        plt.axvline(x=0, color="r", linestyle="--", alpha=0.3)
-        plt.xlabel("Angle θ (degrees)")
-        plt.ylabel("Action (torque)")
-        plt.title("Controller Response to Angle for Different Angular Velocities")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(self.output_dir / "theta_response_family.png")
-
-        # Angular velocity response curves for different angles
-        plt.figure(figsize=(12, 8))
-
-        theta_values = [-np.pi / 6, -np.pi / 12, 0.0, np.pi / 12, np.pi / 6]
-        theta_labels = ["-30°", "-15°", "0°", "15°", "30°"]
-
-        for theta, label in zip(theta_values, theta_labels):
-            states = np.array([[theta, theta_dot, 0.0] for theta_dot in self.theta_dot_range])
-            actions = self.predict_actions(states)
-
-            plt.plot(self.theta_dot_range, actions, label=f"θ = {label}")
-
-        plt.grid(True)
-        plt.axhline(y=0, color="r", linestyle="--", alpha=0.3)
-        plt.axvline(x=0, color="r", linestyle="--", alpha=0.3)
-        plt.xlabel("Angular Velocity θ̇ (rad/s)")
-        plt.ylabel("Action (torque)")
-        plt.title("Controller Response to Angular Velocity for Different Angles")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(self.output_dir / "theta_dot_response_family.png")
-
-        print("Response curve families created and saved.")
-
-    def analyze_controller_nonlinearity(self):
-        """Analyze the nonlinearity of the controller by comparing it to linear approximations."""
-        print("Analyzing controller nonlinearity...")
-
-        # Create a dense grid around the balanced state
-        balanced_theta = 0.0
-        balanced_theta_dot = 0.0
-        prev_action = 0.0
-
-        # Compute action at balanced state
-        balanced_action = self.predict_actions(np.array([[balanced_theta, balanced_theta_dot, prev_action]]))[0][0]
-
-        # Create small perturbation range
-        delta = 0.05
-        thetas = np.linspace(-20 * delta, 20 * delta, 100)
-        theta_dots = np.linspace(-20 * delta, 20 * delta, 100)
-
-        # Compute actions for varying theta (with theta_dot = 0)
-        theta_only_states = np.array([[theta, 0.0, prev_action] for theta in thetas])
-        theta_only_actions = self.predict_actions(theta_only_states).flatten()  # Flatten to 1D array
-
-        # Compute actions for varying theta_dot (with theta = 0)
-        theta_dot_only_states = np.array([[0.0, theta_dot, prev_action] for theta_dot in theta_dots])
-        theta_dot_only_actions = self.predict_actions(theta_dot_only_states).flatten()  # Flatten to 1D array
-
-        # Compute linear approximation coefficients (partial derivatives at origin)
-        # Make sure to extract scalar values
-        k_theta = float((theta_only_actions[51] - theta_only_actions[49]) / (thetas[51] - thetas[49]))
-        k_theta_dot = float(
-            (theta_dot_only_actions[51] - theta_dot_only_actions[49]) / (theta_dots[51] - theta_dots[49])
-        )
-
-        # Create linear approximation models
-        linear_theta_actions = balanced_action + k_theta * (thetas - balanced_theta)
-        linear_theta_dot_actions = balanced_action + k_theta_dot * (theta_dots - balanced_theta_dot)
-
-        # Plot theta nonlinearity
-        plt.figure(figsize=(12, 8))
-        plt.plot(thetas * 180 / np.pi, theta_only_actions, label="DDPG Controller")
-        plt.plot(thetas * 180 / np.pi, linear_theta_actions, "r--", label="Linear Approximation")
-        plt.xlabel("Angle θ (degrees)")
-        plt.ylabel("Action (torque)")
-        plt.title(f"Controller Nonlinearity w.r.t. Angle (k_θ = {k_theta:.2f})")
-        plt.grid(True)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(self.output_dir / "theta_nonlinearity.png")
-
-        # Plot theta_dot nonlinearity
-        plt.figure(figsize=(12, 8))
-        plt.plot(theta_dots, theta_dot_only_actions, label="DDPG Controller")
-        plt.plot(theta_dots, linear_theta_dot_actions, "r--", label="Linear Approximation")
-        plt.xlabel("Angular Velocity θ̇ (rad/s)")
-        plt.ylabel("Action (torque)")
-        plt.title(f"Controller Nonlinearity w.r.t. Angular Velocity (k_θ̇ = {k_theta_dot:.2f})")
-        plt.grid(True)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(self.output_dir / "theta_dot_nonlinearity.png")
-
-        # Create 2D nonlinearity analysis
-        theta_mesh, theta_dot_mesh = np.meshgrid(thetas, theta_dots)
-        states = np.column_stack(
-            (theta_mesh.flatten(), theta_dot_mesh.flatten(), np.ones(theta_mesh.size) * prev_action)
-        )
-
-        # Predict DDPG controller actions
-        actions = self.predict_actions(states)
-        action_mesh = actions.reshape(theta_mesh.shape)
-
-        # Create 2D linear approximation
-        linear_approx = (
-            balanced_action
-            + k_theta * (theta_mesh - balanced_theta)
-            + k_theta_dot * (theta_dot_mesh - balanced_theta_dot)
-        )
-
-        # Calculate nonlinearity (difference between DDPG and linear approximation)
-        nonlinearity = action_mesh - linear_approx
-
-        # Plot 2D nonlinearity heatmap
-        plt.figure(figsize=(12, 10))
-
-        plt.pcolormesh(
-            thetas * 180 / np.pi,
-            theta_dots,
-            nonlinearity,
-            cmap="RdBu",
-            shading="auto",
-            vmin=-np.max(np.abs(nonlinearity)),
-            vmax=np.max(np.abs(nonlinearity)),
-        )
-
-        plt.colorbar(label="Nonlinearity (Action - Linear Approx)")
-        plt.xlabel("Angle θ (degrees)")
-        plt.ylabel("Angular Velocity θ̇ (rad/s)")
-        plt.title("Controller Nonlinearity Map")
-        plt.axhline(y=0, color="k", linestyle="--", alpha=0.3)
-        plt.axvline(x=0, color="k", linestyle="--", alpha=0.3)
-        plt.grid(alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(self.output_dir / "2d_nonlinearity.png", dpi=300)
-
-        print("Nonlinearity analysis completed and saved.")
 
     def analyze_simulated_trajectories(self):
         """Analyze system behavior for simulated trajectories from various initial conditions."""
@@ -868,7 +599,7 @@ class ModelAnalyzer:
 
         # Create lambda function for PD controller
         # Output normalized to [-1, 1] range for fair comparison with DDPG
-        pd_controller = lambda theta, theta_dot: np.clip(-(kp * theta + kd * theta_dot), -1.0, 1.0)
+        pd_controller = lambda theta, theta_dot: np.clip((kp * theta + kd * theta_dot), -1.0, 1.0)
 
         # Create state grid for comparison
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
@@ -964,14 +695,10 @@ class ModelAnalyzer:
 
     def run_complete_analysis(self):
         """Run all analysis methods."""
-        self.analyze_response_curves()
         self.create_action_heatmaps_for_multiple_prev_cmds()
         self.create_phase_space_plot()
         self.create_3d_action_surface()
         self.analyze_stability_regions()
-        self.analyze_sensitivity()
-        self.create_response_curves_family()
-        self.analyze_controller_nonlinearity()
         self.analyze_simulated_trajectories()
         self.generate_comparative_pd_controller()
 
@@ -1096,16 +823,12 @@ def main():
         default="all",
         choices=[
             "all",
-            "response",
             "heatmap",
             "phase",
             "surface",
             "stability",
-            "sensitivity",
-            "nonlinearity",
             "trajectory",
             "pd",
-            "robustness",
         ],
         help="Specific analysis to run",
     )
@@ -1116,9 +839,6 @@ def main():
 
     if args.analysis == "all":
         analyzer.run_complete_analysis()
-    elif args.analysis == "response":
-        analyzer.analyze_response_curves()
-        analyzer.create_response_curves_family()
     elif args.analysis == "heatmap":
         analyzer.create_action_heatmap()
     elif args.analysis == "phase":
@@ -1127,10 +847,6 @@ def main():
         analyzer.create_3d_action_surface()
     elif args.analysis == "stability":
         analyzer.analyze_stability_regions()
-    elif args.analysis == "sensitivity":
-        analyzer.analyze_sensitivity()
-    elif args.analysis == "nonlinearity":
-        analyzer.analyze_controller_nonlinearity()
     elif args.analysis == "trajectory":
         analyzer.analyze_simulated_trajectories()
     elif args.analysis == "pd":
