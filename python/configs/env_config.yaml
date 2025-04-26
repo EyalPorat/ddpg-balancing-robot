@@ -45,6 +45,7 @@ reward:
   "angle_decay": 30.0
   "reached_stable_bonus": 0.0
   "far_from_center_penalty": 10.0
+  "angular_vel_far_from_center_penalty": 69.0
 
 # Episode termination
 termination:

@@ -94,6 +94,7 @@ class BalancerEnv(gym.Env):
                 "reached_stable_bonus": reward_config["reached_stable_bonus"],
                 "stillness": reward_config["stillness"],
                 "far_from_center_penalty": reward_config["far_from_center_penalty"],
+                "angular_vel_far_from_center_penalty": reward_config["angular_vel_far_from_center_penalty"],
             }
         else:
             self.reward_weights = {
@@ -104,6 +105,7 @@ class BalancerEnv(gym.Env):
                 "reached_stable_bonus": 50.0,
                 "stillness": 5.0,
                 "far_from_center_penalty": 0.5,
+                "angular_vel_far_from_center_penalty": 0.5,
             }
 
     def reset(self, seed: Optional[int] = None, should_zero_previous_action: bool = False, state: Optional[np.ndarray] = None) -> Tuple[np.ndarray, Dict]:
@@ -315,7 +317,7 @@ class BalancerEnv(gym.Env):
 
         # New stillness reward that activates near the balanced position
         stillness_reward = 0
-        angle_threshold = np.deg2rad(3)  # Angle threshold for stillness reward
+        angle_threshold = np.deg2rad(10)  # Angle threshold for stillness reward
         if abs(theta) < angle_threshold:
             # Reward is highest when both angle and angular velocity are zero
             # and decreases as either increases
@@ -329,7 +331,7 @@ class BalancerEnv(gym.Env):
         termination_penalty = -20 if self._check_termination() else 0
 
         far_from_center_penalty = -abs(theta) * w["far_from_center_penalty"]
-        angular_vel_far_from_center_penalty = -abs(theta_dot) * w["far_from_center_penalty"]
+        angular_vel_far_from_center_penalty = -abs(theta_dot) * w["angular_vel_far_from_center_penalty"]
 
         reward = w["direction"] * direction_component + stillness_reward + termination_penalty + far_from_center_penalty + angular_vel_far_from_center_penalty
 
