@@ -61,12 +61,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 
     def push(self, state: np.ndarray, action: np.ndarray, reward: float, next_state: np.ndarray, done: bool) -> None:
         """Store a transition with maximum priority."""
-        # Get maximum priority (or default if empty)
-        max_priority = max([abs(p) for p in self.priorities]) if self.priorities else 1.0
-
-        # Ensure max_priority is positive and non-zero
-        max_priority = max(max_priority, self.epsilon)
-
+        max_priority = max(self.priorities) if self.priorities else 1.0
         self.priorities.append(max_priority)
         super().push(state, action, reward, next_state, done)
 
@@ -83,47 +78,17 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         if len(self.buffer) == 0:
             return None
 
-        # Calculate sampling probabilities, ensuring no NaNs or zeros
-        priorities = np.array([abs(p) for p in self.priorities])
-        # Add epsilon to all priorities to avoid zeros and numerical instability
-        priorities = priorities + self.epsilon
-
-        # Clip extremely large values to prevent overflow
-        max_value = 1e6
-        priorities = np.clip(priorities, 0, max_value)
-
-        # Calculate probabilities - alpha controls the amount of prioritization
+        # Calculate sampling probabilities
+        priorities = np.array(self.priorities)
         probabilities = priorities**self.alpha
-
-        # Safety check for NaNs and normalize
-        if np.any(np.isnan(probabilities)):
-            # Fallback to uniform sampling if NaNs are detected
-            print("Warning: NaN detected in priorities, using uniform sampling")
-            probabilities = np.ones_like(probabilities)
-
-        # Normalize probabilities to sum to 1
-        sum_probs = np.sum(probabilities)
-        if sum_probs <= 0 or np.isnan(sum_probs):
-            # Another safety check - should never happen with the above checks
-            print("Warning: Invalid probability sum, using uniform sampling")
-            probabilities = np.ones_like(probabilities) / len(probabilities)
-        else:
-            probabilities = probabilities / sum_probs
+        probabilities /= probabilities.sum()
 
         # Sample indices based on priorities
         indices = np.random.choice(len(self.buffer), batch_size, p=probabilities)
 
         # Calculate importance sampling weights
-        # N * P(i) where N is buffer size
-        sampling_weights = (len(self.buffer) * probabilities[indices]) ** (-beta)
-
-        # Normalize weights to have max weight = 1
-        max_weight = np.max(sampling_weights)
-        if max_weight > 0 and not np.isnan(max_weight):
-            weights = sampling_weights / max_weight
-        else:
-            # Fallback if max_weight is invalid
-            weights = np.ones_like(sampling_weights)
+        weights = (len(self.buffer) * probabilities[indices]) ** (-beta)
+        weights /= weights.max()  # Normalize weights
 
         # Get samples
         batch = [self.buffer[idx] for idx in indices]
@@ -139,20 +104,4 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             priorities: New priority values
         """
         for idx, priority in zip(indices, priorities):
-            # Handle NaN or negative priorities
-            if np.isnan(priority) or priority < 0:
-                priority = self.epsilon
-
-            # Ensure priority is at least epsilon
-            priority = max(priority, self.epsilon)
-
-            # Update the priority in our deque
-            # Convert deque to list for indexed access
-            priorities_list = list(self.priorities)
-            if 0 <= idx < len(priorities_list):
-                priorities_list[idx] = priority
-
-                # Convert back to deque
-                self.priorities = deque(priorities_list, maxlen=self.priorities.maxlen)
-            else:
-                print(f"Warning: Index {idx} out of range for priorities list of length {len(self.priorities)}")
+            self.priorities[idx] = priority + self.epsilon

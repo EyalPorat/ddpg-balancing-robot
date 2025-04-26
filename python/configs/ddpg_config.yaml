@@ -1,9 +1,9 @@
-# Enhanced DDPG Training Configuration with Policy Gradient Prioritized Replay
+# DDPG Training Configuration
 
 # Model parameters
 model:
   actor:
-    hidden_dims: [10, 10]
+    hidden_dims: [8, 4]
     learning_rate: 0.0001
     
   critic:
@@ -21,20 +21,6 @@ training:
   # Experience replay settings
   buffer_size: 1000
   min_buffer_size: 500  # Minimum samples before training starts
-  
-  # Dual Prioritized Replay Buffer settings
-  use_critic_prioritization: true
-  use_actor_prioritization: true
-  actor_prioritization_start_episode: 400
-  
-  critic_alpha: 0.6  # Priority exponent for critic (higher = more prioritization)
-  actor_alpha: 0.6   # Priority exponent for actor
-  critic_beta_start: 0.4  # Initial importance sampling correction for critic
-  actor_beta_start: 0.4   # Initial importance sampling correction for actor
-  beta_anneal_steps: 500  # Steps to anneal beta from start value to 1.0
-  
-  # Buffer management
-  shared_transitions: true  # Whether to store all transitions in both buffers
   
   # Exploration settings
   action_noise: 0.1
