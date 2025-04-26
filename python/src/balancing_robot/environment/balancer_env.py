@@ -329,8 +329,9 @@ class BalancerEnv(gym.Env):
         termination_penalty = -20 if self._check_termination() else 0
 
         far_from_center_penalty = -abs(theta) * w["far_from_center_penalty"]
+        angular_vel_far_from_center_penalty = -abs(theta_dot) * w["far_from_center_penalty"]
 
-        reward = w["direction"] * direction_component + stillness_reward + termination_penalty + far_from_center_penalty
+        reward = w["direction"] * direction_component + stillness_reward + termination_penalty + far_from_center_penalty + angular_vel_far_from_center_penalty
 
         return float(reward)
 
