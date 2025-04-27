@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import sys
 import yaml
@@ -183,15 +184,43 @@ class ModelAnalyzer:
         print("Action heatmap created and saved.")
 
     def create_action_heatmaps_for_multiple_prev_cmds(self):
-        """Create action heatmaps for different previous command values."""
-        print("Creating multiple action heatmaps...")
+        """Create a square 3×3 grid of action heatmaps for prev_cmd ∈ [−1…1], with improved text layout."""
+        sns.set_style("white")
+        prev_cmd_values = np.linspace(-1.0, 1.0, 9)
+        rows = cols = 3
+        vmin, vmax = -1.0, 1.0
 
-        prev_cmd_values = [-1.0, -0.5, 0.0, 0.5, 1.0]
+        fig, axes = plt.subplots(rows, cols, figsize=(12, 12), sharex=True, sharey=True, constrained_layout=True)
 
-        for prev_cmd in prev_cmd_values:
-            self.create_action_heatmap(prev_cmd)
+        theta_deg = self.theta_range * 180.0 / np.pi
 
-        print("All action heatmaps created.")
+        # Plot each panel
+        for idx, prev_cmd in enumerate(prev_cmd_values):
+            ax = axes.flat[idx]
+            Θ, 𝑤 = np.meshgrid(self.theta_range, self.theta_dot_range)
+            states = np.column_stack([Θ.flatten(), 𝑤.flatten(), np.full(Θ.size, prev_cmd)])
+            data = self.predict_actions(states).reshape(Θ.shape)
+
+            im = ax.pcolormesh(
+                theta_deg, self.theta_dot_range, data, cmap="coolwarm", shading="auto", vmin=vmin, vmax=vmax
+            )
+
+            # smaller individual titles, nudged down
+            ax.set_title(f"prev_cmd = {prev_cmd:.2f}", fontsize=8, pad=4)
+            ax.axhline(0, color="gray", linestyle="--", linewidth=0.7)
+            ax.axvline(0, color="gray", linestyle="--", linewidth=0.7)
+
+        # Global labels
+        fig.supxlabel("θ (deg)", fontsize=11, y=0.02)
+        fig.supylabel("θ̇ (rad/s)", fontsize=11, x=0.02, rotation=90)
+
+        # Single colorbar on the right
+        cbar = fig.colorbar(im, ax=axes.ravel().tolist(), location="right", fraction=0.02, pad=0.02)
+        cbar.set_label("Action (normalized [-1,1])", fontsize=10)
+
+        # Save & close
+        fig.savefig(self.output_dir / "action_heatmaps_multiple_prev_cmds_square.png", dpi=300)
+        plt.close(fig)
 
     def create_phase_space_plot(self):
         """Create phase space plot with velocity fields using SimNet."""
@@ -586,7 +615,37 @@ class ModelAnalyzer:
         plt.tight_layout()
         plt.savefig(self.output_dir / "phase_portrait.png")
 
-        print("Trajectory analysis completed and saved.")
+        fig, axs = plt.subplots(3, 1, figsize=(14, 18))
+
+        # 1) Angle θ trajectories
+        for traj in trajectory_data:
+            axs[0].plot(traj["time"], traj["states"][:, 0] * 180 / np.pi, label=traj["label"])
+        axs[0].set_title("Angle θ Trajectories")
+        axs[0].set_ylabel("θ (deg)")
+        axs[0].grid(True)
+
+        # 2) Angular velocity θ̇ trajectories
+        for traj in trajectory_data:
+            axs[1].plot(traj["time"], traj["states"][:, 1], label=traj["label"])
+        axs[1].set_title("Angular Velocity θ̇ Trajectories")
+        axs[1].set_ylabel("θ̇ (rad/s)")
+        axs[1].grid(True)
+
+        # 3) Control action trajectories
+        for traj in trajectory_data:
+            axs[2].plot(traj["time"][:-1], traj["actions"], label=traj["label"])
+        axs[2].set_title("Controller Action Trajectories")
+        axs[2].set_ylabel("Action (normalized)")
+        axs[2].set_xlabel("Time (s)")
+        axs[2].grid(True)
+
+        # unified legend and layout
+        handles, labels = axs[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="upper right")
+        plt.tight_layout()
+        fig.savefig(self.output_dir / "combined_trajectory_types.png", dpi=300)
+        plt.close(fig)
+        print("Combined trajectory‐type plot saved.")
 
     def generate_comparative_pd_controller(self):
         """Generate a classical PD controller for comparison."""
