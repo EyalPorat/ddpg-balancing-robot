@@ -64,8 +64,8 @@ pip install -e .
 ## Development Workflow
 
 1. Train the model:
-   - Use Jupyter notebooks in `python/notebooks/`
-   - Models are saved to `python/checkpoints/`
+   - Use Jupyter notebooks in `python/notebooks/` (`train_ddpg.ipynb` and `train_simnet.ipynb`)
+   - Models are saved to `python/notebooks/logs/`
 
 2. Deploy to robot:
    - Configure network settings in `embedded/include/config.h`
@@ -75,15 +75,7 @@ pip install -e .
 3. Monitor performance:
    - Connect to robot's WiFi access point
    - Open web interface
-   - View real-time telemetry and adjust parameters
-
-## Documentation
-# TODO: add docs
-
-- [Hardware Assembly](docs/hardware_assembly.md)
-- [Network Protocol](docs/network_protocol.md)
-- [Training Guide](docs/training_guide.md)
-- [API Reference](docs/api_reference.md)
+   - View real-time telemetry
 
 ## Modules
 

@@ -20,49 +20,14 @@ pip install -e .
 
 ## Quick Start Examples
 
-### Training DDPG Model
+### Training SimNet - `train_simnet.ipynb`
 
-```python
-from balancing_robot.environment import BalancerEnv
-from balancing_robot.training import DDPGTrainer
-import yaml
-
-# Load configuration
-with open('configs/ddpg_config.yaml', 'r') as f:
-    config = yaml.safe_load(f)
-
-# Create environment and trainer
-env = BalancerEnv(config_path='configs/env_config.yaml')
-trainer = DDPGTrainer(env, config_path='configs/ddpg_config.yaml')
-
-# Train model
-history = trainer.train(num_episodes=2000)
-```
-
-### Training SimNet
-
-```python
-from balancing_robot.models import SimNet
-from balancing_robot.training import SimNetTrainer
-
-# Initialize trainer
-trainer = SimNetTrainer(config_path='configs/simnet_config.yaml')
-
-# Train on physics data first
-train_data, val_data = trainer.collect_physics_data()
-trainer.train(train_data, val_data)
-
-# Then fine-tune on real data
-trainer.train(real_train_data, real_val_data, is_finetuning=True)
-```
+### Training DDPG Model - `train_ddpg.ipynb`
 
 ### Deploying Model to Robot
 
-```python
-from balancing_robot.tools import ModelDeployer
-
-deployer = ModelDeployer()
-deployer.deploy_model('checkpoints/best_model.pt', ip='192.168.1.255')
+```shell
+python tools/model_deployer.py --model "C:\Users\eyalp\Downloads\actor_episode_1200 (3).pt"
 ```
 
 ## Package Structure
@@ -77,7 +42,6 @@ balancing_robot/
 ├── environment/         # Training environments
 │   ├── balancer_env.py # Main training environment
 │   ├── physics.py      # Physics simulation
-│   └── simnet_env.py   # SimNet-based environment
 ├── training/           # Training algorithms
 │   ├── ddpg_trainer.py # DDPG implementation
 │   ├── simnet_trainer.py# SimNet training
@@ -95,10 +59,10 @@ The framework uses YAML configuration files:
 ```yaml
 model:
   actor:
-    hidden_dims: [8, 8]
+    hidden_dims: [10, 10]
     learning_rate: 0.0001
   critic:
-    hidden_dims: [256, 256]
+    hidden_dims: [256, 128, 64]
     learning_rate: 0.0003
 
 training:
@@ -129,10 +93,10 @@ reward:
 #### Actor
 ```python
 actor = Actor(
-    state_dim=6,
+    state_dim=3,
     action_dim=1,
     max_action=1.0,
-    hidden_dims=(8, 8)
+    hidden_dims=(10, 10)
 )
 ```
 
@@ -141,7 +105,7 @@ actor = Actor(
 simnet = SimNet(
     state_dim=6,
     action_dim=1,
-    hidden_dims=(128, 128)
+    hidden_dims=(32, 32, 32)
 )
 ```
 
