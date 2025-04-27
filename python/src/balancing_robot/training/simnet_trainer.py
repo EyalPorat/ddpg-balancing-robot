@@ -511,10 +511,16 @@ class SimNetTrainer:
 
         return batches
 
-    def train_epoch(self, train_data: Dict[str, np.ndarray], batch_size: int) -> Dict[str, float]:
-        """Train for one epoch."""
+    def train_epoch(
+        self,
+        train_data: Dict[str, np.ndarray],
+        batch_size: int,
+        class_balancing_thresholds: Optional[Dict[str, float]],
+    ) -> Dict[str, float]:
+        """Train for one epoch with increased weights for extreme states."""
         self.simnet.train()
         total_loss = 0
+        total_weighted_samples = 0
 
         # Pull out arrays for convenience
         states_arr = train_data["states"]
@@ -533,8 +539,30 @@ class SimNetTrainer:
             # Predict next state
             pred_next_states = self.simnet(states, actions)
 
-            # Compute MSE
-            loss = torch.nn.functional.mse_loss(pred_next_states, target_next_states)
+            # Calculate sample weights based on thresholds
+            # Create weight tensor, default weight = 1.0
+            weights = torch.ones(states.shape[0], device=self.device)
+
+            # Convert angles from radians to degrees (for the 25 degree threshold)
+            angles_degrees = torch.abs(states[:, 0] * 180.0 / np.pi)
+            angular_vels = torch.abs(states[:, 1])
+
+            if class_balancing_thresholds is not None:
+                # Apply 5x weight for samples where angle or angular velocity exceeds thresholds
+                extreme_samples = (angles_degrees > class_balancing_thresholds["angle_deg"]) | (
+                    angular_vels > class_balancing_thresholds["angular_velocity_dps"]
+                )
+
+                weights[extreme_samples] = 5.0
+
+                # Count weighted samples for logging
+                total_weighted_samples += extreme_samples.sum().item()
+
+            # Compute weighted MSE loss
+            squared_errors = (pred_next_states - target_next_states) ** 2
+            # Apply weights to each sample's loss - expand weights to match squared_errors dimensions
+            weighted_errors = weights.unsqueeze(1) * squared_errors
+            loss = weighted_errors.mean()
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -542,7 +570,10 @@ class SimNetTrainer:
 
             total_loss += loss.item()
 
-        return {"train_loss": total_loss / num_batches}
+        return {
+            "train_loss": total_loss / num_batches,
+            "extreme_samples_percent": (total_weighted_samples / num_samples) * 100,
+        }
 
     def validate(self, val_data: Dict[str, np.ndarray], batch_size: int) -> Dict[str, float]:
         self.simnet.eval()
@@ -639,8 +670,11 @@ class SimNetTrainer:
         patience_counter = 0
 
         for epoch in range(num_epochs):
+            class_balancing_thresholds = (
+                None if not is_finetuning else self.config["training"]["class_balancing"]["thresholds"]
+            )
             # Train
-            train_metrics = self.train_epoch(train_data, batch_size)
+            train_metrics = self.train_epoch(train_data, batch_size, class_balancing_thresholds)
 
             # Validate
             val_metrics = self.validate(val_data, batch_size)
