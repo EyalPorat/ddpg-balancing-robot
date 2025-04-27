@@ -254,10 +254,16 @@ class DDPGTrainer:
         polyak_update(self.critic_target, self.critic, self.tau)
 
         if self.prioritized_replay:
-            # Update priorities in replay buffer
-            new_priorities = (
-                td_errors.detach().cpu().numpy().squeeze() + 1e-6
-            )  # small constant to ensure non-zero priority
+            # Get raw Q-values (without the gradient info)
+            q_values = current_Q.detach().cpu().numpy().squeeze()
+
+            # Calculate new priorities:
+            # 1. Base TD error component
+            # 2. Add bonus for negative Q-values (where actor is performing poorly)
+            # 3. Small constant to ensure non-zero priority
+            q_bonus = np.maximum(0, -q_values) * 0.5  # Scale negative Q-values by 0.5
+            new_priorities = td_errors.detach().cpu().numpy().squeeze() + q_bonus + 1e-6
+
             self.replay_buffer.update_priorities(indices, new_priorities)
 
         metrics = {
@@ -272,6 +278,7 @@ class DDPGTrainer:
                 {
                     "mean_priority": float(np.mean(new_priorities)),
                     "max_priority": float(np.max(new_priorities)),
+                    "mean_q_bonus": float(np.mean(q_bonus)),
                 }
             )
 
