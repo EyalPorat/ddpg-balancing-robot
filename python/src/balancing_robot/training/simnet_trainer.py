@@ -553,7 +553,7 @@ class SimNetTrainer:
                     angular_vels > class_balancing_thresholds["angular_velocity_dps"]
                 )
 
-                weights[extreme_samples] = 5.0
+                weights[extreme_samples] = 50.0
 
                 # Count weighted samples for logging
                 total_weighted_samples += extreme_samples.sum().item()
