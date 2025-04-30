@@ -95,6 +95,9 @@ class BalancerEnv(gym.Env):
                 "stillness": reward_config["stillness"],
                 "far_from_center_penalty": reward_config["far_from_center_penalty"],
                 "angular_vel_far_from_center_penalty": reward_config["angular_vel_far_from_center_penalty"],
+                "max_angle_for_angular_vel_far_from_center_penalty" : reward_config[
+                    "max_angle_for_angular_vel_far_from_center_penalty"
+                ],
             }
         else:
             self.reward_weights = {
@@ -106,9 +109,12 @@ class BalancerEnv(gym.Env):
                 "stillness": 5.0,
                 "far_from_center_penalty": 0.5,
                 "angular_vel_far_from_center_penalty": 0.5,
+                "max_angle_for_angular_vel_far_from_center_penalty": 10.0,
             }
 
-    def reset(self, seed: Optional[int] = None, should_zero_previous_action: bool = False, state: Optional[np.ndarray] = None) -> Tuple[np.ndarray, Dict]:
+    def reset(
+        self, seed: Optional[int] = None, should_zero_previous_action: bool = False, state: Optional[np.ndarray] = None
+    ) -> Tuple[np.ndarray, Dict]:
         """Reset environment to initial state.
 
         Args:
@@ -148,7 +154,9 @@ class BalancerEnv(gym.Env):
 
         return self.state, {}
 
-    def step(self, action: np.ndarray, action_as_actual_output: bool = False) -> Tuple[np.ndarray, float, bool, bool, Dict]:
+    def step(
+        self, action: np.ndarray, action_as_actual_output: bool = False
+    ) -> Tuple[np.ndarray, float, bool, bool, Dict]:
         """Execute one environment step with delta-based action.
 
         Args:
@@ -170,7 +178,6 @@ class BalancerEnv(gym.Env):
         # If action is treated as actual output, use it directly
         if action_as_actual_output:
             new_motor_command = np.clip(action, -1.0, 1.0)
-
 
         # Scale the motor command to actual torque
         # This is the only place where max_torque is used - to convert normalized [-1, 1] to physical torque
@@ -331,9 +338,20 @@ class BalancerEnv(gym.Env):
         termination_penalty = -20 if self._check_termination() else 0
 
         far_from_center_penalty = -abs(theta) * w["far_from_center_penalty"]
-        angular_vel_far_from_center_penalty = -abs(theta_dot) * w["angular_vel_far_from_center_penalty"]
 
-        reward = w["direction"] * direction_component + stillness_reward + termination_penalty + far_from_center_penalty + angular_vel_far_from_center_penalty
+        angular_vel_far_from_center_penalty = (
+            -abs(theta_dot) * w["angular_vel_far_from_center_penalty"]
+            if abs(theta) < np.deg2rad(w["max_angle_for_angular_vel_far_from_center_penalty"])
+            else 0
+        )
+
+        reward = (
+            w["direction"] * direction_component
+            + stillness_reward
+            + termination_penalty
+            + far_from_center_penalty
+            + angular_vel_far_from_center_penalty
+        )
 
         return float(reward)
 
