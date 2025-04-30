@@ -95,7 +95,7 @@ class BalancerEnv(gym.Env):
                 "stillness": reward_config["stillness"],
                 "far_from_center_penalty": reward_config["far_from_center_penalty"],
                 "angular_vel_far_from_center_penalty": reward_config["angular_vel_far_from_center_penalty"],
-                "max_angle_for_angular_vel_far_from_center_penalty" : reward_config[
+                "max_angle_for_angular_vel_far_from_center_penalty": reward_config[
                     "max_angle_for_angular_vel_far_from_center_penalty"
                 ],
             }
@@ -337,13 +337,12 @@ class BalancerEnv(gym.Env):
 
         termination_penalty = -20 if self._check_termination() else 0
 
-        far_from_center_penalty = -abs(theta) * w["far_from_center_penalty"]
-
-        angular_vel_far_from_center_penalty = (
-            -abs(theta_dot) * w["angular_vel_far_from_center_penalty"]
-            if abs(theta) < np.deg2rad(w["max_angle_for_angular_vel_far_from_center_penalty"])
-            else 0
-        )
+        if abs(theta) > np.deg2rad(w["max_angle_for_angular_vel_far_from_center_penalty"]):
+            far_from_center_penalty = -abs(theta) * w["far_from_center_penalty"]
+            angular_vel_far_from_center_penalty = 0
+        else:
+            far_from_center_penalty = 0
+            angular_vel_far_from_center_penalty = -abs(theta_dot) * w["angular_vel_far_from_center_penalty"]
 
         reward = (
             w["direction"] * direction_component

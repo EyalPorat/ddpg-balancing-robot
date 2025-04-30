@@ -44,7 +44,7 @@ reward:
   "angular_velocity": 1.0
   "angle_decay": 30.0
   "reached_stable_bonus": 0.0
-  "far_from_center_penalty": 0.0
+  "far_from_center_penalty": 10.0
   "angular_vel_far_from_center_penalty": 10.0
   "max_angle_for_angular_vel_far_from_center_penalty": 15.0  # degrees
 
