@@ -549,11 +549,20 @@ class SimNetTrainer:
 
             if class_balancing_thresholds is not None:
                 # Apply 5x weight for samples where angle or angular velocity exceeds thresholds
-                extreme_samples = (angles_degrees > class_balancing_thresholds["angle_deg"]) | (
-                    angular_vels > class_balancing_thresholds["angular_velocity_dps"]
+                extreme_samples = (
+                    (angles_degrees > class_balancing_thresholds["angle_deg"])
+                    | (angular_vels > class_balancing_thresholds["angular_velocity_dps"])
+                    | (
+                        (angles_degrees > class_balancing_thresholds["motor_angle_deg"])
+                        & (torch.abs(actions).squeeze() < class_balancing_thresholds["max_abs_action"])
+                    )
                 )
 
-                weights[extreme_samples] = 50.0
+                # Ensure extreme_samples is a boolean tensor of the same size as weights
+                extreme_samples = extreme_samples.bool()  
+
+                # weights[extreme_samples] = 50.0
+                weights[~extreme_samples] = 0.1  # Decrease weight for non-extreme samples
 
                 # Count weighted samples for logging
                 total_weighted_samples += extreme_samples.sum().item()

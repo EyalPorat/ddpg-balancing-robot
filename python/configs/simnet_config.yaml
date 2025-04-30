@@ -50,6 +50,9 @@ training:
       angle_deg: 25
       angular_velocity_dps: 120
 
+      max_abs_action: 0.9
+      motor_angle_deg: 10
+
 # Hybrid simulation settings
 hybrid:
   initial_ratio: 0.0
