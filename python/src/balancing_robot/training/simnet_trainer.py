@@ -566,7 +566,7 @@ class SimNetTrainer:
                 extreme_samples = extreme_samples.bool()
 
                 # weights[extreme_samples] = 5.0  # Increase weight for extreme samples
-                weights[~extreme_samples] = 0.1  # Decrease weight for non-extreme samples
+                weights[~extreme_samples] = 0.3  # Decrease weight for non-extreme samples
 
                 # Count weighted samples for logging
                 total_weighted_samples += extreme_samples.sum().item()
