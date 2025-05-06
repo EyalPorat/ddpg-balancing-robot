@@ -314,7 +314,7 @@ class BalancerEnv(gym.Env):
 
     def _compute_reward(self, reached_stable: bool) -> float:
         w = self.reward_weights
-        theta = self.state[0]
+        theta = self.state[0] + np.deg2rad(6.8) # Offset to center the reward around zero
         theta_dot = self.state[1]
 
         # Directional component:

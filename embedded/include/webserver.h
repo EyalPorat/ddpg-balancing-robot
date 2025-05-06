@@ -29,6 +29,7 @@ extern float gyroYdata;
 extern float gyroYoffset;
 extern float varAng;
 extern float varOmg;
+extern float lastComplementaryAngleDDPG;
 extern float powerL;
 extern float powerR;
 extern int16_t maxPwr;

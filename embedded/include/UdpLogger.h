@@ -8,8 +8,9 @@ struct __attribute__((packed)) LogMessage {
     float dt;               // control loop period in seconds
     
     // Controller State
-    float theta;           // body angle (rad)
+    float theta;           // body angle (rad) - relative to initial position
     float theta_dot;       // angular velocity (rad/s)
+    float theta_global;    // absolute body angle (rad) - non-relative
     
     // Control Outputs
     float model_output;    // raw model output

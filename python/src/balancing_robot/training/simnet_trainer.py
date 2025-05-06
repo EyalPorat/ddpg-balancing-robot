@@ -265,7 +265,7 @@ class SimNetTrainer:
                     prev_motor_command = float(current["motor_pwm"]) / 127.0  # This is a compromise
 
                 # Current state includes theta, theta_dot, and PREVIOUS motor command
-                state = np.array([current["theta"], current["theta_dot"], prev_motor_command])
+                state = np.array([current["theta_global"], current["theta_dot"], prev_motor_command])
 
                 # Current action is the motor command applied at the current timestep
                 action = np.array([current["motor_pwm"]]) / 127.0  # Normalize to [-1, 1]
@@ -273,7 +273,7 @@ class SimNetTrainer:
                 # Next state includes next theta, next theta_dot, and CURRENT motor command
                 # (which becomes the "previous" command for the next timestep)
                 current_motor_command = float(current["motor_pwm"]) / 127.0
-                next_state_array = np.array([next_state["theta"], next_state["theta_dot"], current_motor_command])
+                next_state_array = np.array([next_state["theta_global"], next_state["theta_dot"], current_motor_command])
 
                 states.append(state)
                 actions.append(action)

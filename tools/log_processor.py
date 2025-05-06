@@ -30,6 +30,7 @@ class LoggedState:
     # State variables
     theta: float  # body angle (rad)
     theta_dot: float  # angular velocity (rad/s)
+    theta_global: float  # absolute body angle (rad) - non-relative
 
     # Control outputs
     model_output: float  # raw model output
@@ -88,8 +89,8 @@ class LogProcessor:
         self.sock.settimeout(1.0)  # Allow interrupt between packets
         self.sock.bind(("0.0.0.0", port))
 
-        # Data format matching C++ struct (updated for simplified state)
-        self.format = "<I f f f f b ?? f f f f"
+        # Data format matching C++ struct
+        self.format = "<I f f f f f b ?? f f f f"
         self.episodes: List[Episode] = []
 
         # Load config if provided
@@ -110,14 +111,15 @@ class LogProcessor:
             dt=unpacked[1],
             theta=unpacked[2],
             theta_dot=unpacked[3],
-            model_output=unpacked[4],
-            motor_pwm=unpacked[5],
-            standing=unpacked[6],
-            model_active=unpacked[7],
-            battery_voltage=unpacked[8],
-            acc_x=unpacked[9],
-            acc_z=unpacked[10],
-            gyro_x=unpacked[11],
+            theta_global=unpacked[4],
+            model_output=unpacked[5],
+            motor_pwm=unpacked[6],
+            standing=unpacked[7],
+            model_active=unpacked[8],
+            battery_voltage=unpacked[9],
+            acc_x=unpacked[10],
+            acc_z=unpacked[11],
+            gyro_x=unpacked[12],
         )
 
     def collect_episodes(

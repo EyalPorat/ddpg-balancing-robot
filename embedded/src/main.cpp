@@ -218,7 +218,7 @@ void drive() {
         // The controller internally converts theta and theta_dot to normalized action
         // and returns a value scaled to the actual PWM range [-maxPwr, maxPwr]
         float action = ddpgController.getAction(
-            varAngDDPG * DEG_TO_RAD,  // Convert to radians
+            lastComplementaryAngleDDPG * DEG_TO_RAD,  // Convert to radians
             varOmg * DEG_TO_RAD   // Convert to radians
         );
         
@@ -537,6 +537,7 @@ void buildLogMessage(LogMessage &logMessage) {
     
     logMessage.theta = varAngDDPG * DEG_TO_RAD;
     logMessage.theta_dot = varOmg * DEG_TO_RAD;
+    logMessage.theta_global = lastComplementaryAngleDDPG * DEG_TO_RAD;
     
     logMessage.model_output = power;
     logMessage.motor_pwm = outputL;
