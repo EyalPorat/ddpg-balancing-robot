@@ -536,8 +536,12 @@ class SimNetTrainer:
             actions = torch.FloatTensor(actions_arr[idx]).to(self.device)
             target_next_states = torch.FloatTensor(next_states_arr[idx]).to(self.device)
 
-            # Predict next state
-            pred_next_states = self.simnet(states, actions)
+            # Compute target deltas (now working with deltas, not absolute states)
+            target_deltas = torch.zeros_like(target_next_states)
+            target_deltas[:, :2] = target_next_states[:, :2] - states[:, :2]
+
+            # Predict deltas directly
+            pred_deltas = self.simnet.predict_delta(states, actions)
 
             # Calculate sample weights based on thresholds
             # Create weight tensor, default weight = 1.0
@@ -548,7 +552,7 @@ class SimNetTrainer:
             angular_vels = torch.abs(states[:, 1])
 
             if class_balancing_thresholds is not None:
-                # Apply 5x weight for samples where angle or angular velocity exceeds thresholds
+                # Apply higher weights for samples where angle or angular velocity exceeds thresholds
                 extreme_samples = (
                     (angles_degrees > class_balancing_thresholds["angle_deg"])
                     | (angular_vels > class_balancing_thresholds["angular_velocity_dps"])
@@ -559,16 +563,16 @@ class SimNetTrainer:
                 )
 
                 # Ensure extreme_samples is a boolean tensor of the same size as weights
-                extreme_samples = extreme_samples.bool()  
+                extreme_samples = extreme_samples.bool()
 
-                # weights[extreme_samples] = 50.0
+                # weights[extreme_samples] = 5.0  # Increase weight for extreme samples
                 weights[~extreme_samples] = 0.1  # Decrease weight for non-extreme samples
 
                 # Count weighted samples for logging
                 total_weighted_samples += extreme_samples.sum().item()
 
-            # Compute weighted MSE loss
-            squared_errors = (pred_next_states - target_next_states) ** 2
+            # Compute weighted MSE loss on deltas
+            squared_errors = (pred_deltas[:, :2] - target_deltas[:, :2]) ** 2
             # Apply weights to each sample's loss - expand weights to match squared_errors dimensions
             weighted_errors = weights.unsqueeze(1) * squared_errors
             loss = weighted_errors.mean()
@@ -585,6 +589,7 @@ class SimNetTrainer:
         }
 
     def validate(self, val_data: Dict[str, np.ndarray], batch_size: int) -> Dict[str, float]:
+        """Validate the model on delta predictions."""
         self.simnet.eval()
         total_loss = 0
 
@@ -602,8 +607,15 @@ class SimNetTrainer:
                 actions = torch.FloatTensor(actions_arr[idx]).to(self.device)
                 target_next_states = torch.FloatTensor(next_states_arr[idx]).to(self.device)
 
-                pred_next_states = self.simnet(states, actions)
-                loss = torch.nn.functional.mse_loss(pred_next_states, target_next_states)
+                # Calculate target deltas
+                target_deltas = torch.zeros_like(target_next_states)
+                target_deltas[:, :2] = target_next_states[:, :2] - states[:, :2]
+
+                # Get delta predictions
+                pred_deltas = self.simnet.predict_delta(states, actions)
+
+                # Compute loss on first two dimensions only (theta, theta_dot)
+                loss = torch.nn.functional.mse_loss(pred_deltas[:, :2], target_deltas[:, :2])
                 total_loss += loss.item()
 
         return {"val_loss": total_loss / num_batches}

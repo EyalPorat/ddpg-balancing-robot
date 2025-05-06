@@ -244,18 +244,24 @@ class ModelAnalyzer:
         # Predict actions
         actions = self.predict_actions(states)
 
-        # Calculate accelerations using SimNet
+        # Calculate accelerations using delta-based SimNet
         accelerations = []
         for state, action in zip(states, actions):
             self.env.reset(state=state)  # Reset environment to the current state
 
-            # Predict next state using SimNet
-            next_state, _, _, _, _ = self.env.step(action)
+            # Convert state and action to tensors for SimNet
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+            action_tensor = torch.FloatTensor(action).unsqueeze(0).to(self.device)
 
-            # Calculate acceleration as the change in angular velocity
-            # divided by the time step
+            # Get delta predictions directly from SimNet
+            with torch.no_grad():
+                delta_state = self.simnet.predict_delta(state_tensor, action_tensor)
+                delta_theta_dot = delta_state[0, 1].item()  # Grab the angular velocity delta
+
+            # Calculate acceleration as delta_theta_dot divided by dt
             dt = self.env.physics.params.dt
-            acceleration = (next_state[1] - state[1]) / dt
+            acceleration = delta_theta_dot / dt
+
             accelerations.append(acceleration)
 
         accelerations = np.array(accelerations).reshape(theta_mesh.shape)
@@ -288,7 +294,7 @@ class ModelAnalyzer:
         plt.colorbar(label="Velocity Magnitude")
         plt.xlabel("Angle θ (degrees)")
         plt.ylabel("Angular Velocity θ̇ (rad/s)")
-        plt.title("Phase Space Dynamics (SimNet)")
+        plt.title("Phase Space Dynamics (Delta-based SimNet)")
         plt.axhline(y=0, color="k", linestyle="--", alpha=0.3)
         plt.axvline(x=0, color="k", linestyle="--", alpha=0.3)
         plt.grid(alpha=0.3)
@@ -296,6 +302,71 @@ class ModelAnalyzer:
         plt.savefig(self.output_dir / "phase_space.png", dpi=300)
 
         print("Phase space plot created and saved.")
+
+    def create_delta_visualization(self):
+        """Create visualization of the predicted deltas across the state space."""
+        print("Creating delta visualization...")
+
+        # Create meshgrid for state space
+        theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
+
+        # Prepare states for prediction
+        states = np.column_stack(
+            (
+                theta_mesh.flatten(),
+                theta_dot_mesh.flatten(),
+                np.zeros(theta_mesh.size),  # Initialize prev_action to zero
+            )
+        )
+
+        # Predict actions using the actor network
+        actions = self.predict_actions(states)
+
+        # Predict deltas using SimNet
+        delta_thetas = []
+        delta_theta_dots = []
+
+        for state, action in zip(states, actions):
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+            action_tensor = torch.FloatTensor(action).unsqueeze(0).to(self.device)
+
+            with torch.no_grad():
+                delta_state = self.simnet.predict_delta(state_tensor, action_tensor)
+                delta_thetas.append(delta_state[0, 0].item())  # Delta in theta
+                delta_theta_dots.append(delta_state[0, 1].item())  # Delta in theta_dot
+
+        # Reshape for visualization
+        delta_theta_mesh = np.array(delta_thetas).reshape(theta_mesh.shape)
+        delta_theta_dot_mesh = np.array(delta_theta_dots).reshape(theta_mesh.shape)
+
+        # Create visualizations
+        fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+
+        # Convert theta to degrees for readability
+        theta_degrees = self.theta_range * 180 / np.pi
+
+        # Delta theta heatmap
+        im1 = axes[0].pcolormesh(theta_degrees, self.theta_dot_range, delta_theta_mesh, cmap="RdBu", shading="auto")
+        plt.colorbar(im1, ax=axes[0], label="Δθ (change in angle)")
+        axes[0].set_xlabel("Angle θ (degrees)")
+        axes[0].set_ylabel("Angular Velocity θ̇ (rad/s)")
+        axes[0].set_title("Predicted Change in Angle (Δθ)")
+        axes[0].axhline(y=0, color="k", linestyle="--", alpha=0.3)
+        axes[0].axvline(x=0, color="k", linestyle="--", alpha=0.3)
+
+        # Delta theta_dot heatmap
+        im2 = axes[1].pcolormesh(theta_degrees, self.theta_dot_range, delta_theta_dot_mesh, cmap="RdBu", shading="auto")
+        plt.colorbar(im2, ax=axes[1], label="Δθ̇ (change in angular velocity)")
+        axes[1].set_xlabel("Angle θ (degrees)")
+        axes[1].set_ylabel("Angular Velocity θ̇ (rad/s)")
+        axes[1].set_title("Predicted Change in Angular Velocity (Δθ̇)")
+        axes[1].axhline(y=0, color="k", linestyle="--", alpha=0.3)
+        axes[1].axvline(x=0, color="k", linestyle="--", alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(self.output_dir / "delta_visualization.png", dpi=300)
+
+        print("Delta visualization created and saved.")
 
     def create_3d_action_surface(self):
         """Create 3D surface plot of actions."""

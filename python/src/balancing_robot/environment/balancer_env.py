@@ -95,7 +95,7 @@ class BalancerEnv(gym.Env):
                 "stillness": reward_config["stillness"],
                 "far_from_center_penalty": reward_config["far_from_center_penalty"],
                 "angular_vel_far_from_center_penalty": reward_config["angular_vel_far_from_center_penalty"],
-                "max_angle_for_angular_vel_far_from_center_penalty" : reward_config[
+                "max_angle_for_angular_vel_far_from_center_penalty": reward_config[
                     "max_angle_for_angular_vel_far_from_center_penalty"
                 ],
             }
@@ -206,6 +206,7 @@ class BalancerEnv(gym.Env):
             s_tensor = torch.tensor(self.state, dtype=torch.float32, device=self.device).unsqueeze(0)
             # For SimNet, we need to provide the actual command, not the delta
             a_tensor = torch.tensor([[new_motor_command[0]]], dtype=torch.float32, device=self.device)
+
             self.state = self.simnet(s_tensor, a_tensor).cpu().detach().numpy()[0]
             self.state[2] = new_motor_command[0]  # Ensure the motor command is correctly stored
 
@@ -240,6 +241,7 @@ class BalancerEnv(gym.Env):
                 "energy": self.physics.get_energy(self.state[:2]),
                 "prev_motor_command": self.state[2],
                 "delta": delta[0],  # Include delta in info for analysis
+                "predicted_delta": None,  # could be populated if needed
             },
             "reached_stable": reached_stable,
         }
@@ -337,7 +339,6 @@ class BalancerEnv(gym.Env):
 
         termination_penalty = -20 if self._check_termination() else 0
 
-    
         far_from_center_penalty = -abs(theta) * w["far_from_center_penalty"]
 
         angular_vel_far_from_center_penalty = (

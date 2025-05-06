@@ -6,7 +6,7 @@ from typing import Tuple, Dict
 
 
 class SimNet(nn.Module):
-    """Neural network for simulating system dynamics."""
+    """Neural network for simulating system dynamics using delta predictions."""
 
     def __init__(
         self, state_dim: int, action_dim: int, hidden_dims: Tuple[int, ...] = (128, 128), learning_rate: float = 1e-3
@@ -24,7 +24,7 @@ class SimNet(nn.Module):
         self.state_dim = state_dim
         self.action_dim = action_dim
 
-        # Network to predict state
+        # Network to predict delta state (change in state)
         layers = []
         prev_dim = state_dim + action_dim
 
@@ -34,7 +34,7 @@ class SimNet(nn.Module):
 
         self.hidden_layers = nn.Sequential(*layers)
 
-        # Output state
+        # Output delta state (change in state)
         self.output_layer = nn.Linear(prev_dim, state_dim)
 
         # Initialize weights
@@ -57,22 +57,38 @@ class SimNet(nn.Module):
             action: Input action tensor [batch_size, action_dim]
 
         Returns:
-            State predictions [batch_size, state_dim]
+            Next state predictions [batch_size, state_dim]
         """
-        x = torch.cat([state, action], dim=1)
-        x = self.hidden_layers(x)
-        next_state = self.output_layer(x)
+        # Predict delta (change in state)
+        delta_state = self.predict_delta(state, action)
+
+        # Calculate next state by adding delta to current state
+        next_state = state.clone()
+        # Only apply delta to the first two elements (theta, theta_dot)
+        next_state[:, :2] = state[:, :2] + delta_state[:, :2]
 
         # The last element of the state is the previous action
         # We need to replace it with the current action for the next step
         if self.state_dim > 2:  # If we're using the expanded state space
-            # Create a copy of the predicted next state
-            next_state_with_action = next_state.clone()
             # Replace the last element (prev_action) with the current action
-            next_state_with_action[:, -1] = action.squeeze()
-            return next_state_with_action
+            next_state[:, -1] = action.squeeze()
 
         return next_state
+
+    def predict_delta(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        """Predict delta state directly, useful for analyzing model behavior.
+
+        Args:
+            state: Input state tensor [batch_size, state_dim]
+            action: Input action tensor [batch_size, action_dim]
+
+        Returns:
+            Delta state predictions [batch_size, state_dim]
+        """
+        x = torch.cat([state, action], dim=1)
+        x = self.hidden_layers(x)
+        delta_state = self.output_layer(x)
+        return delta_state
 
     def update(self, states: torch.Tensor, actions: torch.Tensor, target_states: torch.Tensor) -> Dict[str, float]:
         """Update network weights using supervised learning.
@@ -80,20 +96,24 @@ class SimNet(nn.Module):
         Args:
             states: Batch of states [batch_size, state_dim]
             actions: Batch of actions [batch_size, action_dim]
-            target_state: Target state [batch_size, state_dim]
+            target_states: Target state [batch_size, state_dim]
 
         Returns:
             Dictionary containing training metrics
         """
-        # Get predictions
-        pred_state = self(states, actions)
+        # Calculate target deltas (difference between target state and current state)
+        target_deltas = torch.zeros_like(target_states)
+        target_deltas[:, :2] = target_states[:, :2] - states[:, :2]
+
+        # Get delta predictions directly
+        pred_deltas = self.predict_delta(states, actions)
 
         # Compute loss - only on the first two dimensions (angle, angular velocity)
         # The third dimension (previous action) is determined by the current action
         if self.state_dim > 2:
-            loss = F.mse_loss(pred_state[:, :2], target_states[:, :2])
+            loss = F.mse_loss(pred_deltas[:, :2], target_deltas[:, :2])
         else:
-            loss = F.mse_loss(pred_state, target_states)
+            loss = F.mse_loss(pred_deltas, target_deltas)
 
         # Optimize
         self.optimizer.zero_grad()
@@ -102,8 +122,8 @@ class SimNet(nn.Module):
 
         return {
             "loss": loss.item(),
-            "pred_mean": pred_state.mean().item(),
-            "pred_std": pred_state.std().item(),
-            "target_mean": target_states.mean().item(),
-            "target_std": target_states.std().item(),
+            "pred_delta_mean": pred_deltas[:, :2].mean().item(),
+            "pred_delta_std": pred_deltas[:, :2].std().item(),
+            "target_delta_mean": target_deltas[:, :2].mean().item(),
+            "target_delta_std": target_deltas[:, :2].std().item(),
         }
