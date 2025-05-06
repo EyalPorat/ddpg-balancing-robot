@@ -10,6 +10,8 @@ from matplotlib import cm
 import seaborn as sns
 from pathlib import Path
 from tqdm import tqdm
+import matplotlib as mpl
+from matplotlib.lines import Line2D
 
 # Add the project module to the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -62,6 +64,7 @@ class ModelAnalyzer:
         # Initialize and load SimNet
         self.simnet = SimNet(state_dim=3, action_dim=1, hidden_dims=(32, 32, 32))
         self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/simnet_final.pt")["state_dict"])
+        # self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/physics/best_simnet.pt")["state_dict"])
         self.simnet.to(device)
         self.simnet.eval()  # Set to evaluation mode
 
@@ -754,7 +757,6 @@ class ModelAnalyzer:
 
     def create_trajectory_heatmap_overlay(self, prev_cmd=0.0, max_steps=200, grid_size=10):
         """Plot action‐heatmap with colored trajectories, arrows, and start/end markers."""
-        import matplotlib as mpl
 
         # — 1) Heatmap background
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
@@ -843,6 +845,142 @@ class ModelAnalyzer:
         plt.close(fig)
         print("Trajectory-overlay heatmap saved.")
 
+    def create_natural_trajectory_overlay(self, grid_size=10, max_steps=100):
+        """Plot trajectory heatmap without any control actions (natural dynamics only).
+
+        This shows where the robot would fall without any control, revealing the
+        natural dynamics of the system.
+
+        Args:
+            grid_size: Number of starting points in each dimension
+            max_steps: Maximum simulation steps for each trajectory
+        """
+        print("Creating natural dynamics trajectory overlay...")
+
+        fig, ax = plt.subplots(figsize=(12, 10))
+
+        # Define state ranges for visualization
+        θ_min, θ_max = self.theta_range.min() * 180 / np.pi, self.theta_range.max() * 180 / np.pi
+        ω_min, ω_max = self.theta_dot_range.min(), self.theta_dot_range.max()
+
+        # Set up the background with grid
+        ax.set_facecolor("#f8f8f8")  # Light gray background
+        ax.grid(color="white", linestyle="--", linewidth=0.8, alpha=0.7)
+
+        # Add zero-axes for reference
+        ax.axhline(y=0, color="gray", linestyle="-", linewidth=1.0, alpha=0.5)
+        ax.axvline(x=0, color="gray", linestyle="-", linewidth=1.0, alpha=0.5)
+
+        # Create grid of starting points
+        thetas0 = np.linspace(self.theta_range.min(), self.theta_range.max(), grid_size)
+        ωs0 = np.linspace(self.theta_dot_range.min(), self.theta_dot_range.max(), grid_size)
+        starts = [(θ0, ω0) for θ0 in thetas0 for ω0 in ωs0]
+
+        # Setup colormap for trajectories
+        cmap = mpl.cm.get_cmap("viridis")
+
+        # Track endpoints to visualize basin of attraction
+        endpoints = []
+
+        # Track trajectories
+        for idx, (θ0, ω0) in enumerate(starts):
+            color = cmap(idx % cmap.N)
+            traj = []
+            state, _ = self.env.reset(state=np.array([θ0, ω0, 0.0]))
+
+            for step in range(max_steps):
+                ang_d = state[0] * 180.0 / np.pi  # Convert to degrees
+                vel = state[1]
+
+                # Check if still in drawable range
+                if not (θ_min <= ang_d <= θ_max and ω_min <= vel <= ω_max):
+                    break
+
+                traj.append((ang_d, vel))
+
+                # Apply ZERO action (natural dynamics)
+                action = np.array([0.0])
+                state, _, done, _, _ = self.env.step(action)
+
+                if done:
+                    break
+
+            # Only plot if we have enough points
+            if len(traj) < 2:
+                continue
+
+            # Store endpoint
+            if len(traj) > 0:
+                endpoints.append(traj[-1])
+
+            # Plot the trajectory
+            xs, ys = zip(*traj)
+            ax.plot(xs, ys, color=color, lw=1.5, alpha=0.8)
+
+            # Add arrows to show direction
+            if len(xs) > 10:
+                # Add more arrows for longer trajectories
+                N = max(1, len(xs) // 8)
+                ax.quiver(
+                    xs[:-1:N],
+                    ys[:-1:N],
+                    np.diff(xs)[::N],
+                    np.diff(ys)[::N],
+                    angles="xy",
+                    scale_units="xy",
+                    scale=1,
+                    width=0.003,
+                    color=color,
+                    alpha=0.8,
+                )
+
+            # Mark start/end points
+            ax.scatter(xs[0], ys[0], marker="o", color="white", edgecolor=color, s=50, zorder=5, linewidth=1.5)
+            ax.scatter(xs[-1], ys[-1], marker="x", color=color, s=40, zorder=5, linewidth=2)
+
+        # Draw contour around endpoints to visualize basin of attraction if we have any endpoints
+        if endpoints:
+            try:
+                endpoints = np.array(endpoints)
+                # Only attempt if we have enough points
+                if len(endpoints) > 5:
+                    from scipy.spatial import ConvexHull
+
+                    hull = ConvexHull(endpoints)
+                    hull_points = endpoints[hull.vertices]
+                    ax.plot(hull_points[:, 0], hull_points[:, 1], "r--", lw=2, alpha=0.6)
+            except Exception as e:
+                # Silently continue if we can't create the hull
+                pass
+
+        # Final styling
+        ax.set_xlabel("Angle θ (deg)")
+        ax.set_ylabel("Angular Velocity θ̇ (rad/s)")
+        ax.set_title("Natural Dynamics Trajectories (No Control)")
+
+        # Add legend explaining markers
+        legend_elements = [
+            Line2D([0], [0], color="k", lw=1.5, alpha=0.8, label="Trajectory"),
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor="w",
+                markeredgecolor="k",
+                markersize=8,
+                label="Starting Point",
+            ),
+            Line2D([0], [0], marker="x", color="k", markersize=8, label="Ending Point"),
+        ]
+        ax.legend(handles=legend_elements, loc="upper right")
+
+        plt.tight_layout()
+        plt.savefig(self.output_dir / "natural_dynamics_trajectories.png", dpi=300)
+        plt.close(fig)
+
+        print("Natural dynamics trajectory overlay saved.")
+
     def run_complete_analysis(self):
         """Run all analysis methods."""
         self.create_action_heatmaps_for_multiple_prev_cmds()
@@ -851,6 +989,7 @@ class ModelAnalyzer:
         self.analyze_stability_regions()
         self.analyze_simulated_trajectories()
         self.create_trajectory_heatmap_overlay(prev_cmd=0.0)
+        self.create_natural_trajectory_overlay()
         self.generate_comparative_pd_controller()
 
         print("\nComplete analysis finished. Results saved to:", self.output_dir)
@@ -996,6 +1135,7 @@ def main():
         analyzer.generate_comparative_pd_controller()
     elif args.analysis == "trajectory_heatmap_overlay":
         analyzer.create_trajectory_heatmap_overlay(prev_cmd=0.0)
+        analyzer.create_natural_trajectory_overlay()
 
 
 if __name__ == "__main__":

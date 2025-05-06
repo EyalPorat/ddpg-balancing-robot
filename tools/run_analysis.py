@@ -56,6 +56,7 @@ def main():
     elif args.type == "performance":
         analyzer.analyze_simulated_trajectories()
         analyzer.create_trajectory_heatmap_overlay()
+        analyzer.create_natural_trajectory_overlay()
         analyzer.analyze_stability_regions()
     elif args.type == "comparison":
         analyzer.generate_comparative_pd_controller()
@@ -63,6 +64,7 @@ def main():
         analyzer.analyze_simulated_trajectories()
     elif args.type == "trajectory_heatmap_overlay":
         analyzer.create_trajectory_heatmap_overlay()
+        analyzer.create_natural_trajectory_overlay()
 
     print(f"Analysis complete. Results saved to {args.output}")
     print(f"Open {output_dir / 'analysis_summary.html'} in a browser to view results")
