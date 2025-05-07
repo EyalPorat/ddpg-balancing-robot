@@ -6,19 +6,19 @@ from typing import Tuple
 
 
 class Critic(nn.Module):
-    """Critic network for DDPG."""
+    """Critic network for DDPG with time series state."""
 
     def __init__(self, state_dim: int, action_dim: int, hidden_dims: Tuple[int, ...] = (256, 256)):
-        """Initialize critic network.
+        """Initialize critic network for time series state.
 
         Args:
-            state_dim: Dimension of state space
+            state_dim: Dimension of time series state space
             action_dim: Dimension of action space
             hidden_dims: Dimensions of hidden layers
         """
         super(Critic, self).__init__()
 
-        # First layer processes state
+        # First layer processes state and action
         self.l1 = nn.Linear(state_dim + action_dim, hidden_dims[0])
         self.ln1 = nn.LayerNorm(hidden_dims[0])
 
@@ -45,12 +45,13 @@ class Critic(nn.Module):
         """Forward pass through the network.
 
         Args:
-            state: Input state tensor
+            state: Input time series state tensor
             action: Input action tensor
 
         Returns:
             Q-value tensor
         """
+        # Concatenate time series state with action
         x = torch.cat([state, action], dim=1)
         x = F.relu(self.ln1(self.l1(x)))
         x = self.hidden_layers(x)

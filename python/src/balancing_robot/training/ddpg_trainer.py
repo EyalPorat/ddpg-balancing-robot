@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 
 class DDPGTrainer:
-    """Trainer for DDPG algorithm."""
+    """Trainer for DDPG algorithm with time series state."""
 
     def __init__(
         self,
@@ -21,15 +21,19 @@ class DDPGTrainer:
         config_path: Optional[str] = None,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
-        """Initialize DDPG trainer.
+        """Initialize DDPG trainer for time series state.
 
         Args:
-            env: Training environment
+            env: Training environment with time series state
             config_path: Path to DDPG config file
             device: Device to use for training
         """
         self.env = env
         self.device = device
+
+        # Get time series params from environment
+        self.time_steps = getattr(env, "time_steps", 10)
+        self.single_state_dim = getattr(env, "single_state_dim", 3)
 
         # Load config
         if config_path:
@@ -42,14 +46,14 @@ class DDPGTrainer:
         model_config = self.config["model"]
         train_config = self.config["training"]
 
-        state_dim = env.observation_space.shape[0]
+        # State dimension for time series (time_steps * single_state_dim)
+        state_dim = env.observation_space.shape[0]  # Should be time_steps * single_state_dim
         action_dim = env.action_space.shape[0]
 
         # We always use max_action=1.0 for the actor
         max_action = 1.0
 
-        # Note: For delta-based control, the actor outputs changes in the range [-1, 1]
-        # which are then scaled by the environment using max_delta parameter
+        # Create actor for time series
         self.actor = Actor(
             state_dim=state_dim,
             action_dim=action_dim,
@@ -57,6 +61,7 @@ class DDPGTrainer:
             hidden_dims=model_config["actor"]["hidden_dims"],
         ).to(device)
 
+        # Create critic for time series
         self.critic = Critic(
             state_dim=state_dim,
             action_dim=action_dim,
@@ -98,7 +103,7 @@ class DDPGTrainer:
         self.min_noise = train_config["min_noise"]
 
         # Curriculum learning parameters
-        self.use_curriculum = train_config.get("use_curriculum", True)  # Default to using curriculum
+        self.use_curriculum = train_config.get("use_curriculum", True)
         self.curriculum_epochs = train_config.get("curriculum_epochs", 200)
         self.curriculum_initial_angle_range_precent = train_config.get("curriculum_initial_angle_range_precent", 0.2)
         self.curriculum_initial_angular_velocity_range_precent = train_config.get(
@@ -184,10 +189,11 @@ class DDPGTrainer:
         return (theta_min, theta_max), (theta_dot_min, theta_dot_max)
 
     def select_action(self, state: np.ndarray, training: bool = True) -> np.ndarray:
-        """Select action using current policy."""
+        """Select action using current policy with time series state."""
         with torch.no_grad():
-            state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            action = self.actor(state).cpu().numpy().flatten()
+            # Convert state to tensor - already in time series format
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+            action = self.actor(state_tensor).cpu().numpy().flatten()
 
             if training:
                 current_noise = max(self.action_noise * (self.noise_decay**self.training_steps), self.min_noise)
@@ -293,19 +299,7 @@ class DDPGTrainer:
         save_freq: int = 100,
         log_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Train the agent.
-
-        Args:
-            num_episodes: Number of episodes to train
-            max_steps: Maximum steps per episode
-            batch_size: Batch size for training
-            eval_freq: Episodes between evaluations
-            save_freq: Episodes between saving models
-            log_dir: Directory for saving logs and models
-
-        Returns:
-            Dictionary containing training history
-        """
+        """Train the agent with support for time series state and curriculum learning."""
         logger = TrainingLogger(log_dir) if log_dir else None
         best_reward = float("-inf")
 
@@ -315,41 +309,16 @@ class DDPGTrainer:
             # Calculate initialization ranges based on curriculum
             theta_range, theta_dot_range = self._calculate_curriculum_ranges(episode)
 
-            # Modify environment's random initialization ranges
-            # We need to monkey-patch the environment's reset method for this episode
-            original_reset = self.env.reset
+            # Create a custom state initialization for curriculum learning
+            theta_deg = self.env.np_random.uniform(theta_range[0], theta_range[1])
+            theta_dot_dps = self.env.np_random.uniform(theta_dot_range[0], theta_dot_range[1])
+            motor_cmd = 0.0  # Start with zero motor command
 
-            def curriculum_reset(seed=None, should_zero_previous_action=False):
-                """Override environment reset to use curriculum ranges."""
-                super_reset = original_reset
+            # Create a single state with these values
+            initial_state = np.array([np.deg2rad(theta_deg), np.deg2rad(theta_dot_dps), motor_cmd])
 
-                # Reset with default parameters
-                state, info = super_reset(seed, should_zero_previous_action)
-
-                # Override the first two state components (theta and theta_dot)
-                # with values sampled from our curriculum ranges
-                theta_deg = self.env.np_random.uniform(theta_range[0], theta_range[1])
-                theta_dot_dps = self.env.np_random.uniform(theta_dot_range[0], theta_dot_range[1])
-
-                # Convert to radians and update state
-                self.env.state = np.array(
-                    [
-                        np.deg2rad(theta_deg),
-                        np.deg2rad(theta_dot_dps),
-                        self.env.state[2],  # Keep the previous motor command unchanged
-                    ]
-                )
-
-                return self.env.state, info
-
-            # Apply the patched reset method
-            self.env.reset = curriculum_reset
-
-            # Reset environment with curriculum ranges
-            state, _ = self.env.reset()
-
-            # Restore original reset method after initialization
-            self.env.reset = original_reset
+            # Reset environment with this custom initial state
+            state, _ = self.env.reset(state=initial_state)
 
             episode_reward = 0
 
@@ -389,6 +358,7 @@ class DDPGTrainer:
                     }
                 )
 
+                # Update progress bar
                 progress_bar.set_postfix(
                     {
                         "episode": episode + 1,

@@ -22,6 +22,11 @@ physics:
   timestep: 0.01        # seconds
   integration_method: "semi-implicit-euler"
 
+  # Motor response parameters
+  motor_response_delay: 10        # Number of time steps to delay motor commands
+  time_series_length: 10         # Number of time steps to keep in history
+  use_time_series_state: true    # Enable/disable time series state representation
+
 # State space
 observation:
   angle_limit: 1.57079632679  # pi/2 radians (90 degrees)

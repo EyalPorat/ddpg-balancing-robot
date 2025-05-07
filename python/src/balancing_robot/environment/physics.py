@@ -58,11 +58,11 @@ class PhysicsEngine:
         """Calculate maximum static friction force."""
         return self.params.static_friction_coeff * self.calculate_normal_force()
 
-    def get_acceleration(self, state: np.ndarray, torque: np.ndarray) -> float:
+    def get_acceleration(self, state: np.ndarray, torque) -> float:
         """Calculate system accelerations based on current state and applied torque.
         Args:
             state: System state [theta, theta_dot]
-            torque: Applied motor torque
+            torque: Applied motor torque (can be float or numpy array)
         Returns:
             Angular acceleration (theta_ddot)
         """
@@ -85,8 +85,12 @@ class PhysicsEngine:
         # drops to 0 at velocity_ratio=1 (critical_velocity) and stays at 0 beyond that
         torque_effectiveness = 1.0 - (2.0 * velocity_ratio) + (velocity_ratio**2)
 
-        # Apply effectiveness to torque
-        effective_torque = torque.item() * torque_effectiveness
+        # Handle the case where torque is a numpy array or tensor
+        if hasattr(torque, "item"):
+            effective_torque = torque.item() * torque_effectiveness
+        else:
+            # Torque is already a scalar
+            effective_torque = torque * torque_effectiveness
 
         # If no effective torque, check static friction
         if abs(effective_torque) < p.motor_deadzone:

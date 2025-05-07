@@ -1,3 +1,4 @@
+import collections
 import yaml
 import gymnasium as gym
 from gymnasium import spaces
@@ -10,7 +11,7 @@ from ..models.simnet import SimNet
 
 
 class BalancerEnv(gym.Env):
-    """Gymnasium environment for a two-wheeled balancing robot."""
+    """Gymnasium environment for a two-wheeled balancing robot with motor delay and time series state."""
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 50}
 
@@ -21,16 +22,9 @@ class BalancerEnv(gym.Env):
         render_mode: Optional[str] = None,
         simnet: Optional[SimNet] = None,
     ):
-        """Initialize environment.
-
-        Args:
-            physics_params: Custom physics parameters
-            simnet: Optional SimNet model for dynamics prediction
-            render_mode: Rendering mode ('human' or 'rgb_array')
-        """
         super().__init__()
 
-        # Load config if provided
+        # Load config
         if config_path:
             with open(config_path, "r") as f:
                 self.config = yaml.safe_load(f)
@@ -43,31 +37,44 @@ class BalancerEnv(gym.Env):
         self.render_mode = render_mode
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Define action space (always normalized to [-1, 1])
-        # The actor network always outputs values in this range
-        if self.config:
-            # max_torque is only used in physics simulation to scale normalized actions to actual torque values
-            self.max_torque = self.config["physics"]["max_torque"]
-            # max_delta is the maximum change allowed in the normalized action space [-1, 1]
-            self.max_delta = self.config["physics"].get("max_delta", 0.1)  # Default to 10% of normalized range
+        # Time series and motor delay configuration
+        if self.config and "physics" in self.config:
+            self.time_steps = self.config["physics"].get("time_series_length", 10)
+            self.motor_delay_steps = self.config["physics"].get("motor_response_delay", 3)
         else:
-            self.max_torque = 0.23  # Used only for physics simulation
-            self.max_delta = 0.1  # 10% of normalized range
+            self.time_steps = 10
+            self.motor_delay_steps = 3
+
+        self.single_state_dim = 3  # [theta, theta_dot, motor_cmd]
+
+        # Motor command buffer for delay modeling
+        self.motor_command_buffer = collections.deque([0.0] * self.time_steps, maxlen=self.time_steps)
+
+        # State history to maintain time series
+        self.state_history = collections.deque(maxlen=self.time_steps)
+
+        # Define action space (normalized to [-1, 1])
+        if self.config:
+            self.max_torque = self.config["physics"]["max_torque"]
+            self.max_delta = self.config["physics"].get("max_delta", 0.1)
+        else:
+            self.max_torque = 0.23
+            self.max_delta = 0.1
 
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
 
-        # Define observation space - [theta, theta_dot, prev_motor_command]
+        # Define observation space - time series format
         if self.config:
             obs_config = self.config["observation"]
-            obs_high = np.array(
+            single_obs_high = np.array(
                 [
                     obs_config["angle_limit"],
                     obs_config["angular_velocity_limit"],
-                    1.0,  # Previous motor command is normalized to [-1, 1]
+                    1.0,  # Motor command normalized to [-1, 1]
                 ]
             )
         else:
-            obs_high = np.array(
+            single_obs_high = np.array(
                 [
                     np.pi / 2,  # theta
                     8.0,  # theta_dot
@@ -75,15 +82,17 @@ class BalancerEnv(gym.Env):
                 ]
             )
 
+        # Time series observation space
+        obs_high = np.tile(single_obs_high, self.time_steps)
         self.observation_space = spaces.Box(low=-obs_high, high=obs_high, dtype=np.float32)
 
         # Initialize state and render setup
-        self.state = None
         self.steps = 0
         self.prev_action = 0.0
         self.fig = None
         self.ax = None
 
+        # Initialize reward weights
         if self.config:
             reward_config = self.config["reward"]
             self.reward_weights = {
@@ -100,6 +109,7 @@ class BalancerEnv(gym.Env):
                 ],
             }
         else:
+            # Default reward weights
             self.reward_weights = {
                 "angle": 5.0,
                 "direction": 3.0,
@@ -112,62 +122,86 @@ class BalancerEnv(gym.Env):
                 "max_angle_for_angular_vel_far_from_center_penalty": 10.0,
             }
 
+    def get_flat_time_series(self) -> np.ndarray:
+        """Get flattened time series state from history."""
+        # If not enough history, pad with copies of first state
+        if len(self.state_history) < self.time_steps:
+            # Get first state or use zeros if no history
+            first_state = self.state_history[0] if self.state_history else np.zeros(self.single_state_dim)
+            # Create padding with repeated first state
+            padding = [first_state] * (self.time_steps - len(self.state_history))
+            states = padding + list(self.state_history)
+        else:
+            states = list(self.state_history)
+
+        # Flatten the list of states
+        return np.concatenate(states)
+
     def reset(
         self, seed: Optional[int] = None, should_zero_previous_action: bool = False, state: Optional[np.ndarray] = None
     ) -> Tuple[np.ndarray, Dict]:
         """Reset environment to initial state.
 
-        Args:
-            seed: Random seed
-            should_zero_previous_action: If True, set previous action to zero
-            state: Optional initial state for the environment
-
-        Returns:
-            Tuple of (observation, info)
+        Returns time series state.
         """
         super().reset(seed=seed)
 
+        # Clear state history and motor command buffer
+        self.state_history = collections.deque(maxlen=self.time_steps)
+        self.motor_command_buffer = collections.deque([0.0] * self.time_steps, maxlen=self.time_steps)
+
         if state is not None:
-            # If a state is provided, use it directly
-            self.state = state
+            # If time series state provided, extract and use the most recent state
+            if len(state) == self.single_state_dim * self.time_steps:
+                # Extract individual state samples from time series
+                samples = [state[i : i + self.single_state_dim] for i in range(0, len(state), self.single_state_dim)]
+
+                # Initialize state history with provided samples
+                for sample in samples:
+                    self.state_history.append(sample.copy())
+
+                # Current state is the most recent one
+                initial_state = samples[-1].copy()
+            else:
+                # Single state provided
+                initial_state = state.copy()
+                self.state_history.append(initial_state.copy())
         else:
-
             # Initialize with random angle and angular velocity
-            theta_deg = self.np_random.uniform(-50, 50)  # theta in degrees
-            theta_dot_dps = self.np_random.uniform(-150, 150)  # theta_dot in degrees per second
-            random_motor_command = self.np_random.uniform(-1.0, 1.0)  # Random initial motor command
-            prev_motor_command = 0.0 if should_zero_previous_action else random_motor_command
+            theta_deg = self.np_random.uniform(-50, 50)
+            theta_dot_dps = self.np_random.uniform(-150, 150)
+            motor_cmd = 0.0 if should_zero_previous_action else self.np_random.uniform(-1.0, 1.0)
 
-            self.state = np.array(
-                [
-                    np.deg2rad(theta_deg),  # Convert theta to radians
-                    np.deg2rad(theta_dot_dps),  # Convert theta_dot to radians per second
-                    prev_motor_command,  # Use random initial motor command
-                ]
-            )
+            initial_state = np.array([np.deg2rad(theta_deg), np.deg2rad(theta_dot_dps), motor_cmd])
 
-        self.prev_action = self.state[2]  # Store the initial motor command
+            self.state_history.append(initial_state.copy())
+
+        # If state history is not full, fill it with copies of initial state
+        while len(self.state_history) < self.time_steps:
+            self.state_history.appendleft(initial_state.copy())
+
         self.steps = 0
+        self.prev_action = self.state_history[-1][2]  # Use motor command from most recent state
 
         if self.render_mode == "human":
             self._render_frame()
 
-        return self.state, {}
+        # Return flattened time series state
+        time_series_state = np.concatenate(list(self.state_history))
+        return time_series_state, {}
 
     def step(
         self, action: np.ndarray, action_as_actual_output: bool = False
     ) -> Tuple[np.ndarray, float, bool, bool, Dict]:
-        """Execute one environment step with delta-based action.
+        """Execute one environment step with motor delay.
 
-        Args:
-            action: Action to take (delta in motor command, scaled to [-1, 1])
-            action_as_actual_output: If True, action is treated as the actual motor command (not delta)
-
-        Returns:
-            Tuple of (observation, reward, terminated, truncated, info)
+        Returns time series state.
         """
-        # Get previous motor command from state
-        prev_motor_command = self.state[2]
+        # Get current state (most recent in history)
+        current_state = self.state_history[-1].copy()
+
+        # Get previous motor command
+        prev_motor_command = current_state[2]
 
         # Calculate delta (scaled by max_delta)
         delta = np.clip(action, -1.0, 1.0) * self.max_delta
@@ -179,55 +213,75 @@ class BalancerEnv(gym.Env):
         if action_as_actual_output:
             new_motor_command = np.clip(action, -1.0, 1.0)
 
-        # Scale the motor command to actual torque
-        # This is the only place where max_torque is used - to convert normalized [-1, 1] to physical torque
-        torque = new_motor_command * self.max_torque
+        # Add to motor command buffer for delay modeling
+        self.motor_command_buffer.append(new_motor_command.item())
+
+        # Get delayed motor command
+        if len(self.motor_command_buffer) > self.motor_delay_steps:
+            delayed_command = self.motor_command_buffer[-self.motor_delay_steps]
+        else:
+            delayed_command = 0.0
+
+        # Scale the delayed motor command to actual torque
+        torque = delayed_command * self.max_torque
 
         # Extract theta and theta_dot for physics update
-        theta, theta_dot, _ = self.state
+        theta, theta_dot = current_state[:2]
 
-        # Calculate angular acceleration with physics engine
-        theta_ddot = self.physics.get_acceleration(self.state[:2], torque)
-
-        # Update state, with SimNet if available
+        # Update state using physics or SimNet
         if self.simnet is None:
-            # Create physics state with just the angle components
+            # Calculate angular acceleration with physics engine
+            theta_ddot = self.physics.get_acceleration(np.array([theta, theta_dot]), torque)
+
+            # Integrate state using physics model
             physics_state = np.array([theta, theta_dot])
-            new_state = self.physics.integrate_state(physics_state, theta_ddot)
-            # Combine with previous action
-            self.state = np.array(
+            new_physics_state = self.physics.integrate_state(physics_state, theta_ddot)
+
+            # Create new state with updated physics and new command
+            next_state = np.array(
                 [
-                    new_state[0],  # Updated theta
-                    new_state[1],  # Updated theta_dot
-                    new_motor_command[0],  # Store the new motor command
+                    new_physics_state[0],  # Updated theta
+                    new_physics_state[1],  # Updated theta_dot
+                    new_motor_command.item(),  # Store the new motor command
                 ]
             )
         else:
-            s_tensor = torch.tensor(self.state, dtype=torch.float32, device=self.device).unsqueeze(0)
-            # For SimNet, we need to provide the actual command, not the delta
-            a_tensor = torch.tensor([[new_motor_command[0]]], dtype=torch.float32, device=self.device)
+            # Use SimNet for next state prediction using time series
+            # Get current time series state
+            time_series_state = np.concatenate(list(self.state_history))
 
-            self.state = self.simnet(s_tensor, a_tensor).cpu().detach().numpy()[0]
-            self.state[2] = new_motor_command[0]  # Ensure the motor command is correctly stored
+            # Convert to tensors for SimNet
+            s_tensor = torch.tensor(time_series_state, dtype=torch.float32, device=self.device).unsqueeze(0)
+            a_tensor = torch.tensor([[new_motor_command.item()]], dtype=torch.float32, device=self.device)
 
-        # Add noise to state
+            # Get next time series from SimNet
+            next_time_series = self.simnet(s_tensor, a_tensor).cpu().detach().numpy()[0]
+
+            # Extract the newest state (last 3 elements)
+            next_state = next_time_series[-self.single_state_dim :].copy()
+            next_state[2] = new_motor_command.item()  # Ensure motor command is correctly stored
+
+        # Add noise to state if configured
         if self.config:
             noise_std = self.config["observation"]["noise_std"]
-            # Add noise only to theta and theta_dot, not to the action
+            # Add noise only to theta and theta_dot
             noise = self.np_random.normal(0, noise_std, size=2)
-            self.state[:2] += noise
+            next_state[:2] += noise
+
+        # Add new state to history
+        self.state_history.append(next_state.copy())
 
         self.steps += 1
-        self.prev_action = new_motor_command[0]  # Store current motor command for next step
+        self.prev_action = new_motor_command.item()
 
         # Check if reached stable state
         min_angle_for_stable = np.deg2rad(6)
         min_angular_velocity_for_stable = np.deg2rad(6)
         reached_stable = (
-            abs(self.state[0]) < min_angle_for_stable and abs(self.state[1]) < min_angular_velocity_for_stable
+            abs(next_state[0]) < min_angle_for_stable and abs(next_state[1]) < min_angular_velocity_for_stable
         )
 
-        # Calculate rewards
+        # Calculate rewards based on the most recent state
         reward = self._compute_reward(reached_stable)
 
         # Check termination conditions
@@ -237,11 +291,12 @@ class BalancerEnv(gym.Env):
         # Additional info
         info = {
             "state_of_interest": {
-                "angle": self.state[0],
-                "energy": self.physics.get_energy(self.state[:2]),
-                "prev_motor_command": self.state[2],
-                "delta": delta[0],  # Include delta in info for analysis
-                "predicted_delta": None,  # could be populated if needed
+                "angle": next_state[0],
+                "energy": self.physics.get_energy(next_state[:2]),
+                "prev_motor_command": next_state[2],
+                "delta": delta.item(),
+                "motor_delay": self.motor_delay_steps,
+                "delayed_command": delayed_command,
             },
             "reached_stable": reached_stable,
         }
@@ -249,7 +304,9 @@ class BalancerEnv(gym.Env):
         if self.render_mode == "human":
             self._render_frame()
 
-        return self.state, reward, terminated, truncated, info
+        # Return time series state
+        time_series_state = np.concatenate(list(self.state_history))
+        return time_series_state, reward, terminated, truncated, info
 
     # def _compute_reward(self, reached_stable: bool) -> float:
     #     """Compute reward based on current state."""
@@ -313,28 +370,26 @@ class BalancerEnv(gym.Env):
     #     return float(reward)
 
     def _compute_reward(self, reached_stable: bool) -> float:
+        """Compute reward based on most recent state."""
         w = self.reward_weights
-        theta = self.state[0] + np.deg2rad(6.8) # Offset to center the reward around zero
-        theta_dot = self.state[1]
 
-        # Directional component:
-        # Reward corrective actions when angle and angular velocity have opposite signs
-        # Negative reward when angle and angular velocity have same sign
-        # (robot is moving away from center)
-        # Scale theta_dot contribution exponentially based on angle magnitude
+        # Get most recent state
+        current_state = self.state_history[-1] + np.deg2rad(6.8)  # Offset to center the reward around zero
+        theta = current_state[0]
+        theta_dot = current_state[1]
+
+        # The reward calculation can remain the same, just using the most recent state
         direction_component = -np.sign(theta) * theta_dot
 
-        # New stillness reward that activates near the balanced position
+        # Stillness reward near balanced position
         stillness_reward = 0
-        angle_threshold = np.deg2rad(10)  # Angle threshold for stillness reward
+        angle_threshold = np.deg2rad(10)
         if abs(theta) < angle_threshold:
-            # Reward is highest when both angle and angular velocity are zero
-            # and decreases as either increases
             angle_factor = 1.0 - (abs(theta) / angle_threshold)
-            stillness_reward = w["stillness"] * angle_factor  # Square velocity term for stronger effect
+            stillness_reward = w["stillness"] * angle_factor
 
             if abs(theta_dot) < np.deg2rad(30):
-                velocity_factor = max(0, 1.0 - (abs(theta_dot) / np.deg2rad(40)))  # 0.5 rad/s threshold
+                velocity_factor = max(0, 1.0 - (abs(theta_dot) / np.deg2rad(40)))
                 stillness_reward += velocity_factor**2 * w["stillness"]
 
         termination_penalty = -20 if self._check_termination() else 0
@@ -358,8 +413,10 @@ class BalancerEnv(gym.Env):
         return float(reward)
 
     def _check_termination(self) -> bool:
-        """Check if episode should terminate."""
-        theta = self.state[0]
+        """Check if episode should terminate based on most recent angle."""
+        # Get most recent state
+        current_state = self.state_history[-1]
+        theta = current_state[0]
 
         # Terminate if angle too large
         if self.config:
@@ -369,7 +426,7 @@ class BalancerEnv(gym.Env):
             return abs(theta) > np.pi / 3
 
     def _render_frame(self):
-        """Render one frame of the environment."""
+        """Render one frame of the environment using the most recent state."""
         import matplotlib.pyplot as plt
 
         if self.fig is None:
@@ -379,9 +436,10 @@ class BalancerEnv(gym.Env):
 
         self.ax.clear()
 
-        # Extract state
-        theta = self.state[0]
-        prev_action = self.state[2]
+        # Extract most recent state for visualization
+        current_state = self.state_history[-1]
+        theta = current_state[0]
+        prev_action = current_state[2]
 
         # Robot dimensions
         wheel_radius = self.physics.params.r
@@ -408,7 +466,12 @@ class BalancerEnv(gym.Env):
         self.ax.set_aspect("equal")
 
         # Add title with state information including previous motor command
-        self.ax.set_title(f"θ: {theta * 180/np.pi:.1f}°\n" f"Motor: {prev_action:.2f}\n" f"Steps: {self.steps}")
+        self.ax.set_title(
+            f"θ: {theta * 180/np.pi:.1f}°\n"
+            f"Motor: {prev_action:.2f}\n"
+            f"Steps: {self.steps}\n"
+            f"Motor Delay: {self.motor_delay_steps} steps"
+        )
 
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()

@@ -7,6 +7,11 @@ model:
   activation: "relu"
   layer_norm: true
 
+  # Time series settings
+  use_time_series: true      # Whether to use time series state representation
+  time_steps: 10             # Number of time steps in history
+  single_state_dim: 3        # Dimension of single state [theta, theta_dot, motor_cmd]
+
 # Training data collection
 data_collection:
   physics_samples: 10000000
