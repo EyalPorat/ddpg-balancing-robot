@@ -47,7 +47,7 @@ training:
     oversample: true        # Alternative to weighted sampling
 
     thresholds:
-      angle_deg: 25
+      angle_deg: 20
       angular_velocity_dps: 120
 
       max_abs_action: 0.9

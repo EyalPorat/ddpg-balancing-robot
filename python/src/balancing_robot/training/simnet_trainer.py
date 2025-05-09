@@ -578,6 +578,7 @@ class SimNetTrainer:
         train_data: Dict[str, np.ndarray],
         batch_size: int,
         class_balancing_thresholds: Optional[Dict[str, float]],
+        is_finetuning: bool = False,
     ) -> Dict[str, float]:
         """Train for one epoch with full state prediction."""
         self.simnet.train()
@@ -629,8 +630,11 @@ class SimNetTrainer:
                 # Ensure extreme_samples is a boolean tensor of the same size as weights
                 extreme_samples = extreme_samples.bool()
 
-                # weights[extreme_samples] = 5.0  # Increase weight for extreme samples
-                weights[~extreme_samples] = 0.3  # Decrease weight for non-extreme samples
+                if is_finetuning:
+                    # weights[extreme_samples] = 5.0  # Increase weight for extreme samples
+                    weights[~extreme_samples] = 0.1  # Decrease weight for non-extreme samples
+                else:
+                    weights[~extreme_samples] = 1.0
 
                 # Count weighted samples for logging
                 total_weighted_samples += extreme_samples.sum().item()
@@ -818,7 +822,7 @@ class SimNetTrainer:
                 None if not is_finetuning else self.config["training"]["class_balancing"]["thresholds"]
             )
             # Train
-            train_metrics = self.train_epoch(train_data, batch_size, class_balancing_thresholds)
+            train_metrics = self.train_epoch(train_data, batch_size, class_balancing_thresholds, is_finetuning)
 
             # Validate
             val_metrics = self.validate(val_data, batch_size)
