@@ -63,8 +63,8 @@ public:
             // Initialize components one at a time with checks
             Serial.println("Creating actor...");
             if (!actor) {
-                // Enhanced state: (theta, theta_dot, prev_action, theta_ma, theta_dot_ma, action_history)
-                actor = new DDPGActor(ENHANCED_STATE_SIZE, 10, 1, 1.0f);  // Note: Actor always outputs in [-1, 1] range
+                // Enhanced state: (theta, theta_dot, prev_action, theta_ma, theta_dot_ma, action_history[0..3])
+                actor = new DDPGActor(9, 10, 1, 1.0f);
                 if (!actor) {
                     Serial.println("Failed to create actor");
                     return false;

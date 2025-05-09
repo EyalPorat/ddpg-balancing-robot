@@ -73,7 +73,7 @@ class ModelAnalyzer:
         self.actor = self._load_model()
 
         # Initialize and load SimNet with enhanced state
-        self.simnet = SimNet(state_dim=self.enhanced_state_dim, action_dim=1, hidden_dims=(32, 32, 32))
+        self.simnet = SimNet(state_dim=self.enhanced_state_dim, action_dim=1, hidden_dims=(64, 64, 64))
         self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/simnet_final.pt")["state_dict"])
         self.simnet.to(device)
         self.simnet.eval()  # Set to evaluation mode
@@ -333,7 +333,7 @@ class ModelAnalyzer:
         for state, action in zip(states, actions):
             # Convert to tensors for SimNet
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            action_tensor = torch.FloatTensor([action]).unsqueeze(0).to(self.device)
+            action_tensor = torch.FloatTensor(action).unsqueeze(0).to(self.device)
 
             # Get delta predictions from SimNet
             with torch.no_grad():
@@ -560,7 +560,7 @@ class ModelAnalyzer:
 
                     # Check if balanced using average of last 10 readings for angular velocity
                     if (
-                        abs(next_state[0]) < stable_threshold_theta
+                        abs(next_state[0] + np.deg2rad(11.0)) < stable_threshold_theta
                         and abs(np.mean(theta_dot_history)) < stable_threshold_theta_dot
                     ):
                         stability_grid[i, j] = 1
