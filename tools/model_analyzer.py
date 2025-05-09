@@ -952,6 +952,8 @@ class ModelAnalyzer:
         ωs0 = np.linspace(self.theta_dot_range.min(), self.theta_dot_range.max(), grid_size)
         starts = [(θ0, ω0) for θ0 in thetas0 for ω0 in ωs0]
 
+        max_delta = getattr(self.env, 'max_delta', 0.25)  # Default to 0.25 if not specified
+        
         cmap = mpl.cm.get_cmap("tab10")
         for idx, (θ0, ω0) in enumerate(starts):
             color = cmap(idx % cmap.N)
@@ -964,6 +966,9 @@ class ModelAnalyzer:
             theta_history = collections.deque([θ0] * self.theta_history_size, maxlen=self.theta_history_size)
             theta_dot_history = collections.deque([ω0] * self.theta_history_size, maxlen=self.theta_history_size)
             action_history = collections.deque([prev_cmd] * self.action_history_size, maxlen=self.action_history_size)
+            
+            # Track current motor command through simulation
+            current_motor_command = prev_cmd
 
             for _ in range(max_steps):
                 # Get current basic state values
@@ -981,22 +986,36 @@ class ModelAnalyzer:
                 traj.append((ang_d, vel))
 
                 with torch.no_grad():
-                    # Get action for current state
+                    # Get action (delta) from actor network
                     state_tensor = torch.FloatTensor(enhanced_state).unsqueeze(0).to(self.device)
-                    action = self.actor(state_tensor).cpu().numpy()[0][0]
+                    delta_action = self.actor(state_tensor).cpu().numpy()[0][0]
+                    
+                    # Scale delta by max_delta
+                    delta_action *= max_delta
+                    
+                    # Add to current command and clip to valid range
+                    new_motor_command = np.clip(current_motor_command + delta_action, -1.0, 1.0)
+                    
+                    # Save for next iteration
+                    current_motor_command = new_motor_command
 
                 # Update history buffers
                 theta_history.append(theta)
                 theta_dot_history.append(theta_dot)
-                action_history.appendleft(action)  # Add newest action at front
+                action_history.appendleft(current_motor_command)  # Add newest action at front
 
-                # Predict next state using SimNet
-                action_tensor = torch.FloatTensor([action]).unsqueeze(0).to(self.device)
+                # Use the corrected action (new_motor_command) for SimNet, not the delta
+                action_tensor = torch.FloatTensor([[current_motor_command]]).to(self.device)
 
                 with torch.no_grad():
                     next_state = self.simnet(state_tensor, action_tensor).cpu().numpy()[0]
 
+                # Update state for next iteration
                 enhanced_state = next_state
+                
+                # Break if robot has fallen (like in first function)
+                if abs(enhanced_state[0]) > np.pi / 2:
+                    break
 
             if len(traj) < 2:
                 continue
@@ -1275,9 +1294,7 @@ class ModelAnalyzer:
                 </ul>
                 <p>All actions are normalized to [-1, 1] range, with motor delay compensation built into the control policy.</p>
             </div>
-        """.format(
-            self.action_history_size
-        )
+        """
 
         # Group images by category based on filename
         categories = {
