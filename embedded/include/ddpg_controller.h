@@ -54,11 +54,17 @@ public:
                 heap_caps_malloc_extmem_enable(20000);
             }
 
+            // Calculate enhanced state size based on configuration constants
+            const int ENHANCED_STATE_SIZE = 3 + 2 + ACTION_HISTORY_SIZE;
+            Serial.printf("Enhanced state size: %d\n", ENHANCED_STATE_SIZE);
+            Serial.printf("State structure: theta, theta_dot, prev_action, theta_ma, theta_dot_ma, action_history[%d]\n", 
+                         ACTION_HISTORY_SIZE);
+
             // Initialize components one at a time with checks
             Serial.println("Creating actor...");
             if (!actor) {
-                // Enhanced state: (theta, theta_dot, prev_action, theta_ma, theta_dot_ma, pwm_hist[0], pwm_hist[1], pwm_hist[2], pwm_hist[3])
-                actor = new DDPGActor(9, 10, 1, 1.0f);  // Note: Actor always outputs in [-1, 1] range
+                // Enhanced state: (theta, theta_dot, prev_action, theta_ma, theta_dot_ma, action_history)
+                actor = new DDPGActor(ENHANCED_STATE_SIZE, 10, 1, 1.0f);  // Note: Actor always outputs in [-1, 1] range
                 if (!actor) {
                     Serial.println("Failed to create actor");
                     return false;
@@ -76,7 +82,7 @@ public:
 
             Serial.println("Initializing state buffer...");
             try {
-                state_buffer.resize(9);  // Enhanced state with 9 elements
+                state_buffer.resize(ENHANCED_STATE_SIZE);  // Enhanced state
             } catch (const std::exception& e) {
                 Serial.println("Failed to resize state buffer");
                 return false;
@@ -215,9 +221,9 @@ public:
     float getReceiveProgress() const { return receiver ? receiver->getProgress() : 0.0f; }
 
 private:
-    static const int ACTION_HISTORY_SIZE = 4;
-    static const int THETA_HISTORY_SIZE = 5;
-    static const int MOTOR_DELAY_STEPS = 10; // 0.1s at 100Hz
+    static const int ACTION_HISTORY_SIZE = 4;  // Action history size for enhanced state
+    static const int THETA_HISTORY_SIZE = 5;   // Theta history size for moving average calculation
+    static const int MOTOR_DELAY_STEPS = 2;    // ~80ms at 25Hz
 
     DDPGActor* actor;
     ModelReceiver* receiver;

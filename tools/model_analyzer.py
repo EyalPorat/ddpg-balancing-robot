@@ -65,7 +65,8 @@ class ModelAnalyzer:
         self.motor_delay_steps = self.env_config["physics"].get("motor_delay_steps", 10)
 
         # Calculate enhanced state dimension
-        self.enhanced_state_dim = 3 + 2 + self.action_history_size  # Basic state + moving averages + action history
+        # Basic state (3) + moving averages (2) + action history
+        self.enhanced_state_dim = 3 + 2 + self.action_history_size
         print(f"Using enhanced state representation with dimension: {self.enhanced_state_dim}")
 
         # Initialize model with enhanced state size
@@ -79,6 +80,16 @@ class ModelAnalyzer:
 
         # Load environment for reference values
         self.env = BalancerEnv(config_path=env_config_path, simnet=self.simnet)
+
+        # Verify state dimensions match
+        env_state_dim = self.env.observation_space.shape[0]
+        if env_state_dim != self.enhanced_state_dim:
+            print(
+                f"WARNING: Environment state dimension ({env_state_dim}) doesn't match calculated dimension ({self.enhanced_state_dim})"
+            )
+            print("This may cause issues with state processing. Please check your configuration.")
+        else:
+            print(f"State dimensions verified: {self.enhanced_state_dim}")
 
         # Get state ranges from environment config if available
         if "observation" in self.env_config:
@@ -122,13 +133,29 @@ class ModelAnalyzer:
         print(
             f"Loading model with architecture: state_dim={self.enhanced_state_dim}, action_dim=1, hidden_dims={hidden_dims}"
         )
+        print(
+            f"Enhanced state structure: theta, theta_dot, prev_action, theta_ma, theta_dot_ma, action_history[{self.action_history_size}]"
+        )
         print(f"Using normalized action space with max_action=1.0")
 
         # Load weights
         checkpoint = torch.load(self.model_path, map_location=torch.device(self.device))
-        actor.load_state_dict(checkpoint["state_dict"])
-        actor.eval()
 
+        # Print the model state_dict keys to help diagnose any issues
+        try:
+            actor.load_state_dict(checkpoint["state_dict"])
+            print("Model loaded successfully")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            print("Model state dictionary keys:")
+            for key in checkpoint["state_dict"].keys():
+                print(f"  {key}")
+            print("Expected keys for current architecture:")
+            for key in actor.state_dict().keys():
+                print(f"  {key}")
+            raise
+
+        actor.eval()
         return actor
 
     def _create_enhanced_state(self, theta, theta_dot, prev_cmd=0.0):
@@ -140,14 +167,21 @@ class ModelAnalyzer:
         # Create action history (all set to prev_cmd for simplicity)
         action_history = np.ones(self.action_history_size) * prev_cmd
 
-        # Combine into enhanced state
-        return np.concatenate(
+        # Combine into enhanced state - note explicit structure
+        enhanced_state = np.concatenate(
             [
                 [theta, theta_dot, prev_cmd],  # Basic state
                 [theta_ma, theta_dot_ma],  # Moving averages
-                action_history,  # Action history
+                action_history,  # Action history (self.action_history_size elements)
             ]
         )
+
+        # Verify state dimension
+        expected_dim = 3 + 2 + self.action_history_size
+        if len(enhanced_state) != expected_dim:
+            raise ValueError(f"Enhanced state dimension mismatch. Got {len(enhanced_state)}, expected {expected_dim}")
+
+        return enhanced_state
 
     def predict_actions(self, states):
         """Predict actions for given states, handling enhanced state representation."""

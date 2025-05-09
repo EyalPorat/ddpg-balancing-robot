@@ -93,8 +93,8 @@ class BalancerEnv(gym.Env):
 
         # Motor delay model - buffer of commands with configurable delay
         self.motor_delay_steps = (
-            self.config["physics"].get("motor_delay_steps", 10) if self.config else 10
-        )  # Default to 0.1s at 100Hz
+            self.config["physics"].get("motor_delay_steps", 2) if self.config else 2
+        )  # Default to ~80ms at 25Hz
         self.motor_command_buffer = collections.deque([0.0] * self.motor_delay_steps, maxlen=self.motor_delay_steps)
 
         # Tracking for moving averages and action history
@@ -338,7 +338,7 @@ class BalancerEnv(gym.Env):
         """Compute reward based on current state."""
         # Reward calculation remains the same
         w = self.reward_weights
-        theta = self.state[0] + np.deg2rad(6.8) # Offset to center the reward around zero
+        theta = self.state[0] + np.deg2rad(6.8)  # Offset to center the reward around zero
         theta_dot = self.state[1]
 
         # Directional component

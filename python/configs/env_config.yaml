@@ -19,12 +19,12 @@ physics:
   static_friction: 0.7   # coefficient
   
   # Motor delay parameters
-  motor_delay_steps: 10  # 0.1s at 100Hz control frequency
-  motor_tau_rise: 0.02   # Rise time constant (20ms)
-  motor_tau_fall: 0.03   # Fall time constant (30ms)
+  motor_delay_steps: 2   # ~80ms at 25Hz
+  motor_tau_rise: 0.05   # Rise time constant (50ms, adjusted for 25Hz)
+  motor_tau_fall: 0.08   # Fall time constant (80ms, adjusted for 25Hz)
   
-  # Simulation parameters
-  timestep: 0.01        # seconds
+  # Simulation parameters - UPDATED FOR 25Hz
+  timestep: 0.04         # seconds (changed from 0.01 for 25Hz)
   integration_method: "semi-implicit-euler"
 
 # State space
@@ -55,11 +55,11 @@ reward:
 # Episode termination
 termination:
   max_angle: 1.0472  # 60 degrees in radians
-  max_steps: 200
+  max_steps: 50
 
 # Rendering
 render:
   mode: "human"  # or "rgb_array"
   width: 800
   height: 600
-  fps: 50
+  fps: 25

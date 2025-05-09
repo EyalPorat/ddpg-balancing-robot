@@ -255,20 +255,14 @@ class SimNetTrainer:
         return train_data, val_data
 
     def process_real_data(self, log_data: List[Dict[str, Any]]) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
-        """Process real robot log data for training with enhanced state representation.
-
-        Args:
-            log_data: List of logged data dictionaries
-
-        Returns:
-            Tuple of (train_data, val_data) dictionaries with enhanced state
-        """
+        """Process real robot log data for training with enhanced state representation."""
         states = []
         actions = []
         next_states = []
         dt_factors = []  # To store the time difference ratio
+
         # Environment timestep (target)
-        env_dt = 0.01  # 100Hz - the timestep used in simulation and control
+        env_dt = 0.04  # 25Hz - the timestep used in simulation and control
 
         # For each episode in the log_data
         for episode in log_data:
@@ -289,15 +283,17 @@ class SimNetTrainer:
                 # Calculate the real time difference between states
                 time_diff = (next_state["timestamp"] - current["timestamp"]) / 1000.0  # Convert ms to seconds
 
-                # Skip invalid time differences (e.g., if there's a logging error causing negative time)
+                # Skip invalid time differences
                 if time_diff <= 0:
                     continue
 
                 # Calculate the ratio between real time difference and environment timestep
                 dt_factor = time_diff / env_dt
 
-                # Skip if the time difference is too large (indicating potential gap in data)
-                if dt_factor > 10.0:  # Arbitrary threshold, adjust as needed
+                # Skip if the time difference is too large - ADJUSTED FOR 25Hz
+                # With 25Hz, real data at ~33Hz is much closer to our simulation frequency,
+                # so we can use a tighter threshold
+                if dt_factor > 2.5:
                     continue
 
                 # Get the previous motor command for current state
@@ -385,6 +381,7 @@ class SimNetTrainer:
                 f"  Average real dt: {np.mean(dt_factors * env_dt):.4f}s ({1.0/(np.mean(dt_factors * env_dt)):.1f}Hz)"
             )
             print(f"  Min dt factor: {np.min(dt_factors):.2f}, Max dt factor: {np.max(dt_factors):.2f}")
+            print(f"  25Hz simulation timestep: {env_dt:.4f}s")
             print(f"  Adjustment applied to {len(states)} state transitions")
 
             # Update next_states with adjusted values

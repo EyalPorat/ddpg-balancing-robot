@@ -26,17 +26,15 @@
 #define ANGLE_Y 180
 
 // Timing constants
-#define DISPLAY_UPDATE_PERIOD 100  // 10Hz in ms
-#define LOGGING_PERIOD 25         // 40Hz in ms
+#define DISPLAY_UPDATE_PERIOD 100 // 10Hz in ms
+#define LOGGING_PERIOD 40         // 25Hz in ms
 
 // Network configuration
 const char* WIFI_SSID = "SSID";
 const char* WIFI_PASSWORD = "PASSWORD";
 const uint16_t UDP_PORT = 44444;
 
-// Add these variables to the global variables section in main.cpp
-// Motor delay parameters - can be adjusted in config.h
-const int MOTOR_DELAY_STEPS = 10;  // Default 0.1s at 100Hz
+const int MOTOR_DELAY_STEPS = 2;
 std::queue<float> motor_command_buffer;
 
 // Forward declarations
@@ -95,7 +93,7 @@ float aveAccX = 0.0, aveAccZ = 0.0, aveAbsOmg = 0.0;
 
 // System configuration
 float cutoff = 0.1;
-const float clk = 0.01;
+const float clk = 0.04;
 const uint32_t interval = (uint32_t)(clk * 1000);
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastLoggingUpdate = 0;
@@ -226,14 +224,23 @@ void drive() {
             lastComplementaryAngleDDPG * DEG_TO_RAD,  // Convert to radians
             varOmg * DEG_TO_RAD                       // Convert to radians
         );
-        
+
         // Store action in history buffer (only for tracking)
         motor_command_buffer.push(action);
         if (motor_command_buffer.size() > MOTOR_DELAY_STEPS) {
             motor_command_buffer.pop(); // Keep buffer size consistent
         }
         
-        action = constrain(action, -maxPwr, maxPwr);
+        // float action = 0.0f;
+        // action = constrain(action, -maxPwr, maxPwr);
+
+        // // Create a random action for data collection
+        // // float random_factor = random(600, 300) / 1000.0f;
+        // float random_factor = -0.4f;
+        // // action = random_factor * varAngDDPG * (0.6f * maxPwr) - (1.0f * maxPwr);
+        // action = random_factor * maxPwr * (varAngDDPG / abs(varAngDDPG));
+        // action = constrain(action, -maxPwr, maxPwr);
+
         driveMotorL(action);
         driveMotorR(action);
         

@@ -42,17 +42,17 @@ class PhysicsParams:
             self.r = 0.033
             self.I = 0.001
             self.i = 2e-5
-            self.dt = 0.01
+            self.dt = 0.04
 
-            # Motor parameters - fix: added max_torque
-            self.max_torque = 0.23  # N⋅m (default: 0.23)
-            self.motor_deadzone = 0.04  # N⋅m
-            self.static_friction_coeff = 0.7  # coefficient
+            # Motor parameters
+            self.max_torque = 0.23
+            self.motor_deadzone = 0.04
+            self.static_friction_coeff = 0.7
 
-            # Motor delay parameters
-            self.motor_delay_steps = 10  # Default: 0.1s at 100Hz
-            self.motor_tau_rise = 0.02  # Rise time constant (20ms)
-            self.motor_tau_fall = 0.03  # Fall time constant (30ms)
+            # Motor delay parameters - UPDATED FOR 25Hz
+            self.motor_delay_steps = 2  # ~80ms at 25Hz
+            self.motor_tau_rise = 0.05  # Rise time constant (50ms)
+            self.motor_tau_fall = 0.08  # Fall time constant (80ms)
 
 
 class PhysicsEngine:
@@ -82,15 +82,6 @@ class PhysicsEngine:
     def apply_motor_response_dynamics(self, target_torque: float) -> float:
         """
         Apply motor response dynamics to simulate realistic motor behavior.
-
-        This models motor response as a first-order system with different time
-        constants for rising vs falling torque.
-
-        Args:
-            target_torque: Target torque command
-
-        Returns:
-            Actual effective torque after motor dynamics
         """
         # Calculate required change
         delta_torque = target_torque - self.current_effective_torque
@@ -107,8 +98,9 @@ class PhysicsEngine:
         # Euler integration: T_next = T_current + (T_target - T_current)*(dt/tau)
         torque_change = delta_torque * (self.params.dt / tau)
 
-        # Limit maximum rate of change
-        max_change_per_step = 0.05 * self.params.max_torque  # 5% of max torque per step
+        # Limit maximum rate of change - ADJUSTED FOR 25Hz
+        # At 25Hz we can allow larger changes per step
+        max_change_per_step = 0.15 * self.params.max_torque  # 15% of max torque per step (increased from 5%)
         torque_change = np.clip(torque_change, -max_change_per_step, max_change_per_step)
 
         # Update current effective torque

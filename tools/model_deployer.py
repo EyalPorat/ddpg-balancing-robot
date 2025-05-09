@@ -170,7 +170,7 @@ def main():
     config = load_config(args.config)
 
     # Determine state dimension from config
-    state_dim = 9  # Default enhanced state size
+    state_dim = 9  # Default enhanced state size (3 basic + 2 moving avg + 4 history)
 
     # Check if we have observation parameters
     if "observation" in config:
@@ -178,8 +178,12 @@ def main():
         action_history_size = config["observation"].get("action_history_size", 4)
         state_dim = 3 + 2 + action_history_size
         logger.info(f"Using state dimension from config: {state_dim}")
+        logger.info(
+            f"State structure: theta, theta_dot, prev_action, theta_ma, theta_dot_ma, action_history[{action_history_size}]"
+        )
     else:
         logger.info(f"Using default enhanced state dimension: {state_dim}")
+        logger.info("State structure: theta, theta_dot, prev_action, theta_ma, theta_dot_ma, action_history[4]")
 
     # Create model with enhanced state input
     # We always use max_action=1.0 for the actor, as actions are normalized to [-1, 1]
@@ -189,15 +193,59 @@ def main():
 
     # Load saved weights
     checkpoint = torch.load(args.model, map_location=torch.device("cpu"))
-    actor.load_state_dict(checkpoint["state_dict"])
 
-    # Export and deploy
+    # Try to load the model weights and provide helpful diagnostics if it fails
+    try:
+        actor.load_state_dict(checkpoint["state_dict"])
+        logger.info("Model loaded successfully")
+    except Exception as e:
+        logger.error(f"Error loading model: {e}")
+        logger.error("Model state dictionary keys:")
+        for key in checkpoint["state_dict"].keys():
+            logger.error(f"  {key}")
+        logger.error("Expected keys for current architecture:")
+        for key in actor.state_dict().keys():
+            logger.error(f"  {key}")
+        logger.error("This may indicate a state dimension mismatch between the saved model and your config.")
+        logger.error("Check that your action_history_size and other state components match.")
+        sys.exit(1)
+
+    # Verify input layer matches state dimensions
+    try:
+        # Get the first network layer
+        first_layer = actor.network[0]
+        input_dim = first_layer.weight.shape[1]
+
+        if input_dim != state_dim:
+            logger.warning(
+                f"WARNING: Model input dimension ({input_dim}) doesn't match expected state dimension ({state_dim})"
+            )
+            logger.warning("This suggests a mismatch between the model and your configuration.")
+            logger.warning("The deployment may fail when running on the robot.")
+
+            # Ask for confirmation to continue
+            if input("Continue with deployment despite dimension mismatch? (y/n): ").lower() != "y":
+                logger.info("Deployment cancelled")
+                sys.exit(0)
+        else:
+            logger.info(f"State dimensions verified: {state_dim}")
+    except Exception as e:
+        logger.error(f"Error checking dimensions: {e}")
+
+    # Export and verify network structure
     deployer = ModelDeployer(args.ip, args.port)
 
     temp_file = "temp_weights.bin"
     deployer.export_network_weights(actor, temp_file)
 
     if deployer.verify_weights_file(temp_file):
+        # Print verification details for enhanced state structure
+        logger.info(f"Weight file verified with expected input dimension: {state_dim}")
+        logger.info("Layer dimensions:")
+        logger.info(f"  L1: 10×{state_dim} (First hidden layer × enhanced state)")
+        logger.info("  L2: 10×10 (Second hidden layer)")
+        logger.info("  L3: 1×10 (Output layer)")
+
         if deployer.send_weights(temp_file):
             logger.info("Model deployed successfully")
         else:
