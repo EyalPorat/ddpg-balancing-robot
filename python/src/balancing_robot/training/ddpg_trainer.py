@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
+import collections
 
 from ..models import Actor, Critic, ReplayBuffer, PrioritizedReplayBuffer
 from ..environment import BalancerEnv
@@ -13,7 +14,7 @@ from tqdm import tqdm
 
 
 class DDPGTrainer:
-    """Trainer for DDPG algorithm."""
+    """Trainer for DDPG algorithm with motor delay compensation."""
 
     def __init__(
         self,
@@ -331,16 +332,20 @@ class DDPGTrainer:
                 theta_deg = self.env.np_random.uniform(theta_range[0], theta_range[1])
                 theta_dot_dps = self.env.np_random.uniform(theta_dot_range[0], theta_dot_range[1])
 
-                # Convert to radians and update state
-                self.env.state = np.array(
+                # Convert to radians and update state - preserve the enhanced state structure
+                basic_state = np.array(
                     [
                         np.deg2rad(theta_deg),
                         np.deg2rad(theta_dot_dps),
                         self.env.state[2],  # Keep the previous motor command unchanged
                     ]
                 )
+                self.env.state = basic_state.copy()
 
-                return self.env.state, info
+                # Get the enhanced state (this will update histories and moving averages)
+                enhanced_state = self.env._get_enhanced_state()
+
+                return enhanced_state, info
 
             # Apply the patched reset method
             self.env.reset = curriculum_reset
@@ -373,7 +378,7 @@ class DDPGTrainer:
                 if done:
                     break
 
-            # Log curriculum parameters
+            # Log episode results
             if logger:
                 logger.log(
                     {
@@ -453,5 +458,10 @@ class DDPGTrainer:
         return total_reward / num_episodes
 
     def print_model_info(self):
+        """Print summary of model architecture with enhanced state."""
+        print("Actor Model Summary (Enhanced State):")
         print(self.actor)
+        print("\nCritic Model Summary (Enhanced State):")
         print(self.critic)
+        print(f"\nState Dimensions: {self.env.observation_space.shape[0]}")
+        print("State Structure: [theta, theta_dot, prev_action, theta_ma, theta_dot_ma, pwm_history[0:4]]")

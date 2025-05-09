@@ -1,7 +1,7 @@
 import yaml
 import numpy as np
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List, Tuple
 
 
 @dataclass
@@ -23,10 +23,18 @@ class PhysicsParams:
             self.I = config["body_inertia"]
             self.i = config["wheel_inertia"]
             self.dt = config["timestep"]
-            self.motor_deadzone = config["motor_deadzone"]
-            self.static_friction_coeff = config["static_friction"]
+
+            # Motor parameters - fix: added max_torque
+            self.max_torque = config.get("max_torque", 0.23)  # N⋅m (default: 0.23)
+            self.motor_deadzone = config["motor_deadzone"]  # N⋅m
+            self.static_friction_coeff = config["static_friction"]  # coefficient
+
+            # Motor delay parameters
+            self.motor_delay_steps = config.get("motor_delay_steps", 10)  # Default: 0.1s at 100Hz
+            self.motor_tau_rise = config.get("motor_tau_rise", 0.02)  # Rise time constant (20ms)
+            self.motor_tau_fall = config.get("motor_tau_fall", 0.03)  # Fall time constant (30ms)
         else:
-            # Default values as before
+            # Default values
             self.g = 9.81
             self.M = 0.06
             self.m = 0.04
@@ -35,12 +43,20 @@ class PhysicsParams:
             self.I = 0.001
             self.i = 2e-5
             self.dt = 0.01
-            self.motor_deadzone = 0.04
-            self.static_friction_coeff = 0.7
+
+            # Motor parameters - fix: added max_torque
+            self.max_torque = 0.23  # N⋅m (default: 0.23)
+            self.motor_deadzone = 0.04  # N⋅m
+            self.static_friction_coeff = 0.7  # coefficient
+
+            # Motor delay parameters
+            self.motor_delay_steps = 10  # Default: 0.1s at 100Hz
+            self.motor_tau_rise = 0.02  # Rise time constant (20ms)
+            self.motor_tau_fall = 0.03  # Fall time constant (30ms)
 
 
 class PhysicsEngine:
-    """Physics engine for the balancing robot."""
+    """Physics engine for the balancing robot with motor delay simulation."""
 
     def __init__(self, params: Optional[PhysicsParams] = None):
         """Initialize physics engine with parameters.
@@ -50,6 +66,11 @@ class PhysicsEngine:
         """
         self.params = params or PhysicsParams()
 
+        # Motor delay simulation
+        self.command_buffer = []
+        self.current_effective_torque = 0.0
+        self.target_torque = 0.0
+
     def calculate_normal_force(self) -> float:
         """Calculate normal force on wheels."""
         return (self.params.M + 2 * self.params.m) * self.params.g
@@ -58,7 +79,48 @@ class PhysicsEngine:
         """Calculate maximum static friction force."""
         return self.params.static_friction_coeff * self.calculate_normal_force()
 
-    def get_acceleration(self, state: np.ndarray, torque: np.ndarray) -> float:
+    def apply_motor_response_dynamics(self, target_torque: float) -> float:
+        """
+        Apply motor response dynamics to simulate realistic motor behavior.
+
+        This models motor response as a first-order system with different time
+        constants for rising vs falling torque.
+
+        Args:
+            target_torque: Target torque command
+
+        Returns:
+            Actual effective torque after motor dynamics
+        """
+        # Calculate required change
+        delta_torque = target_torque - self.current_effective_torque
+
+        # Different time constants for acceleration vs deceleration
+        if abs(target_torque) > abs(self.current_effective_torque):
+            # Rising torque - use rise time constant
+            tau = self.params.motor_tau_rise
+        else:
+            # Falling torque - use fall time constant
+            tau = self.params.motor_tau_fall
+
+        # Apply first-order dynamics: dT/dt = (T_target - T_current)/tau
+        # Euler integration: T_next = T_current + (T_target - T_current)*(dt/tau)
+        torque_change = delta_torque * (self.params.dt / tau)
+
+        # Limit maximum rate of change
+        max_change_per_step = 0.05 * self.params.max_torque  # 5% of max torque per step
+        torque_change = np.clip(torque_change, -max_change_per_step, max_change_per_step)
+
+        # Update current effective torque
+        new_effective_torque = self.current_effective_torque + torque_change
+
+        # Store for next step
+        self.current_effective_torque = new_effective_torque
+        self.target_torque = target_torque
+
+        return new_effective_torque
+
+    def get_acceleration(self, state: np.ndarray, torque: float) -> float:
         """Calculate system accelerations based on current state and applied torque.
         Args:
             state: System state [theta, theta_dot]
@@ -70,6 +132,9 @@ class PhysicsEngine:
         theta = state[0]
         theta_dot = state[1]
         p = self.params
+
+        # Apply motor response dynamics to model realistic motor behavior
+        effective_torque = self.apply_motor_response_dynamics(torque)
 
         # Calculate static friction effects
         max_static_friction = self.calculate_static_friction_threshold()
@@ -86,7 +151,7 @@ class PhysicsEngine:
         torque_effectiveness = 1.0 - (2.0 * velocity_ratio) + (velocity_ratio**2)
 
         # Apply effectiveness to torque
-        effective_torque = torque.item() * torque_effectiveness
+        effective_torque = effective_torque * torque_effectiveness
 
         # If no effective torque, check static friction
         if abs(effective_torque) < p.motor_deadzone:

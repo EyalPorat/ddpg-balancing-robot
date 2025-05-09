@@ -14,9 +14,14 @@ physics:
   
   # Motor parameters
   max_torque: 0.23       # N⋅m (used only in physics simulation to scale normalized actions)
-  max_delta: 0.25         # Max change in normalized action (as fraction of [-1, 1] range)
+  max_delta: 0.25        # Max change in normalized action (as fraction of [-1, 1] range)
   motor_deadzone: 0.04   # N⋅m
   static_friction: 0.7   # coefficient
+  
+  # Motor delay parameters
+  motor_delay_steps: 10  # 0.1s at 100Hz control frequency
+  motor_tau_rise: 0.02   # Rise time constant (20ms)
+  motor_tau_fall: 0.03   # Fall time constant (30ms)
   
   # Simulation parameters
   timestep: 0.01        # seconds
@@ -26,18 +31,17 @@ physics:
 observation:
   angle_limit: 1.57079632679  # pi/2 radians (90 degrees)
   angular_velocity_limit: 8.0  # rad/s
+  
+  # Enhanced state parameters
+  theta_history_size: 5       # Size of theta history for moving average
+  action_history_size: 4      # Number of previous action values to store
 
   noise_std: 0.015  # observation noise
 
 # Reward parameters
 reward:
-  # reached_stable_bonus: 100.0
   angle_weight: 2.0
-  # angular_velocity_weight: 0.004
   
-  # # Exponential decay factors
-  # angle_decay: 15.0
-
   "angle": 5.0
   "direction": 10.0
   "stillness": 50.0

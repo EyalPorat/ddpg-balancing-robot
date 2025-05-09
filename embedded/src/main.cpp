@@ -6,6 +6,7 @@
 #include <UdpLogger.h>
 #include <ddpg_controller.h>
 #include <webserver.h>
+#include <queue>
 
 // Pin definitions
 #define LED 10
@@ -33,6 +34,11 @@ const char* WIFI_SSID = "SSID";
 const char* WIFI_PASSWORD = "PASSWORD";
 const uint16_t UDP_PORT = 44444;
 
+// Add these variables to the global variables section in main.cpp
+// Motor delay parameters - can be adjusted in config.h
+const int MOTOR_DELAY_STEPS = 10;  // Default 0.1s at 100Hz
+std::queue<float> motor_command_buffer;
+
 // Forward declarations
 void estimateAngle();
 void delayWithEstimation(int n);
@@ -57,6 +63,7 @@ void periodicDisplayUpdate();
 void periodicLoggingUpdate();
 void drive();
 void checkButtonPress();
+void initMotorCommandBuffer();
 
 // System state
 byte demoMode = 0;
@@ -215,17 +222,23 @@ void drive() {
 
     if (demoMode == MODE_DDPG && ddpgController.isInitialized()) {
         // Get action from DDPG controller
-        // The controller internally converts theta and theta_dot to normalized action
-        // and returns a value scaled to the actual PWM range [-maxPwr, maxPwr]
         float action = ddpgController.getAction(
             lastComplementaryAngleDDPG * DEG_TO_RAD,  // Convert to radians
-            varOmg * DEG_TO_RAD   // Convert to radians
+            varOmg * DEG_TO_RAD                       // Convert to radians
         );
         
-        // Constrain the action to the valid PWM range
+        // Store action in history buffer (only for tracking)
+        motor_command_buffer.push(action);
+        if (motor_command_buffer.size() > MOTOR_DELAY_STEPS) {
+            motor_command_buffer.pop(); // Keep buffer size consistent
+        }
+        
         action = constrain(action, -maxPwr, maxPwr);
         driveMotorL(action);
         driveMotorR(action);
+        
+        // For logging and display
+        powerL = powerR = action;
     } else {
         varSpd += power * clk;
         varDst += Kdst * (varSpd * clk - moveTarget);
@@ -236,8 +249,14 @@ void drive() {
         powerR = power;
         powerL = power;
 
-        ipowerL = (int16_t)constrain(powerL, -maxPwr, maxPwr);
-        ipowerR = (int16_t)constrain(powerR, -maxPwr, maxPwr);
+        // Store in history buffer (for consistency, not used for control)
+        motor_command_buffer.push(power);
+        if (motor_command_buffer.size() > MOTOR_DELAY_STEPS) {
+            motor_command_buffer.pop();
+        }
+
+        ipowerL = (int16_t)constrain(power, -maxPwr, maxPwr);
+        ipowerR = (int16_t)constrain(power, -maxPwr, maxPwr);
         
         motorPowerWithPunch(ipowerL, motorLdir, punchCountL, driveMotorL);
         motorPowerWithPunch(ipowerR, motorRdir, punchCountR, driveMotorR);
@@ -273,6 +292,8 @@ void resetMotor() {
     counterOverPwr = 0;
     punchCountL = punchCountR = 0;
     motorLdir = motorRdir = 0;
+    
+    initMotorCommandBuffer();
 }
 
 void gyroCalibration() {
@@ -405,6 +426,9 @@ void setup() {
     }
     
     gyroCalibration();
+
+    // Initialize motor delay buffer
+    initMotorCommandBuffer();
 
     Serial.printf("Free heap: %d\n", ESP.getFreeHeap());    
     Serial.println("Setup complete");
@@ -590,4 +614,16 @@ void printHeapInfo() {
     Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
     Serial.printf("Minimum free heap: %d bytes\n", ESP.getMinFreeHeap());
     Serial.printf("Maximum alloc heap: %d bytes\n", ESP.getMaxAllocHeap());
+}
+
+void initMotorCommandBuffer() {
+    // Clear the buffer
+    while (!motor_command_buffer.empty()) {
+        motor_command_buffer.pop();
+    }
+    
+    // Fill with zeros
+    for (int i = 0; i < MOTOR_DELAY_STEPS; i++) {
+        motor_command_buffer.push(0.0f);
+    }
 }

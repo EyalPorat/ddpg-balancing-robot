@@ -15,6 +15,20 @@ public:
         max_action = 0.0f;
         max_delta = 0.1f;  // Default to 10% maximum change per step
         current_motor_command = 0.0f;
+        
+        // Initialize motor history and moving averages
+        for (int i = 0; i < ACTION_HISTORY_SIZE; i++) {
+            action_history[i] = 0.0f;
+        }
+        
+        theta_ma = 0.0f;
+        theta_dot_ma = 0.0f;
+        
+        // Initialize theta history
+        for (int i = 0; i < THETA_HISTORY_SIZE; i++) {
+            theta_history[i] = 0.0f;
+            theta_dot_history[i] = 0.0f;
+        }
     }
     
     ~DDPGController() {
@@ -43,8 +57,8 @@ public:
             // Initialize components one at a time with checks
             Serial.println("Creating actor...");
             if (!actor) {
-                // (theta, theta_dot, prev_action)
-                actor = new DDPGActor(3, 10, 1, 1.0f);  // Note: Actor always outputs in [-1, 1] range
+                // Enhanced state: (theta, theta_dot, prev_action, theta_ma, theta_dot_ma, pwm_hist[0], pwm_hist[1], pwm_hist[2], pwm_hist[3])
+                actor = new DDPGActor(9, 10, 1, 1.0f);  // Note: Actor always outputs in [-1, 1] range
                 if (!actor) {
                     Serial.println("Failed to create actor");
                     return false;
@@ -62,7 +76,7 @@ public:
 
             Serial.println("Initializing state buffer...");
             try {
-                state_buffer.resize(3);
+                state_buffer.resize(9);  // Enhanced state with 9 elements
             } catch (const std::exception& e) {
                 Serial.println("Failed to resize state buffer");
                 return false;
@@ -95,7 +109,6 @@ public:
                 Serial.println("No weights file found");
             }
 
-
             Serial.println("DDPG init complete");
             return true;
             
@@ -126,12 +139,51 @@ public:
         }
     }
 
+    // Update moving averages of theta and theta_dot
+    void updateMovingAverages(float theta, float theta_dot) {
+        // Shift values in history buffers
+        for (int i = THETA_HISTORY_SIZE - 1; i > 0; i--) {
+            theta_history[i] = theta_history[i-1];
+            theta_dot_history[i] = theta_dot_history[i-1];
+        }
+        
+        // Add new values
+        theta_history[0] = theta;
+        theta_dot_history[0] = theta_dot;
+        
+        // Calculate moving averages
+        float theta_sum = 0.0f;
+        float theta_dot_sum = 0.0f;
+        
+        for (int i = 0; i < THETA_HISTORY_SIZE; i++) {
+            theta_sum += theta_history[i];
+            theta_dot_sum += theta_dot_history[i];
+        }
+        
+        theta_ma = theta_sum / THETA_HISTORY_SIZE;
+        theta_dot_ma = theta_dot_sum / THETA_HISTORY_SIZE;
+    }
+
     float getAction(float theta, float theta_dot) {
         if (!initialized || !actor) return 0.0f;
-    
-        state_buffer[0] = theta;
-        state_buffer[1] = theta_dot;
+        
+        // Update moving averages
+        updateMovingAverages(theta, theta_dot);
+        
+        // Update PWM history before computing new action
+        // PWM history is already shifted when the action is applied
+        
+        // Build enhanced state
+        state_buffer[0] = theta;                            // theta
+        state_buffer[1] = theta_dot;                        // theta_dot
         state_buffer[2] = current_motor_command / max_action;  // Normalize to [-1, 1]
+        state_buffer[3] = theta_ma;                         // theta moving average
+        state_buffer[4] = theta_dot_ma;                     // theta_dot moving average
+        
+        // Add action history to state
+        for (int i = 0; i < ACTION_HISTORY_SIZE; i++) {
+            state_buffer[5 + i] = action_history[i] / max_action;  // Normalize to [-1, 1]
+        }
     
         // Get the delta action from the actor (already in [-1, 1] range)
         float delta_action = actor->forward(state_buffer);
@@ -146,6 +198,12 @@ public:
         // Store the normalized action for the next step
         prev_action = delta_action;
         
+        // Update action history - shift values
+        for (int i = ACTION_HISTORY_SIZE - 1; i > 0; i--) {
+            action_history[i] = action_history[i-1];
+        }
+        action_history[0] = new_command;  // Add new command to history
+        
         // Update current motor command
         current_motor_command = new_command;
         
@@ -157,6 +215,10 @@ public:
     float getReceiveProgress() const { return receiver ? receiver->getProgress() : 0.0f; }
 
 private:
+    static const int ACTION_HISTORY_SIZE = 4;
+    static const int THETA_HISTORY_SIZE = 5;
+    static const int MOTOR_DELAY_STEPS = 10; // 0.1s at 100Hz
+
     DDPGActor* actor;
     ModelReceiver* receiver;
     std::vector<float> state_buffer;
@@ -165,6 +227,13 @@ private:
     float max_action;   // Maximum torque/PWM
     float max_delta;    // Maximum change allowed per step (as fraction)
     float current_motor_command;  // Current applied motor command
+    
+    // Enhanced state components
+    float action_history[ACTION_HISTORY_SIZE];   // History of action commands
+    float theta_ma;                              // Moving average of theta
+    float theta_dot_ma;                          // Moving average of theta_dot
+    float theta_history[THETA_HISTORY_SIZE];     // History of theta values
+    float theta_dot_history[THETA_HISTORY_SIZE]; // History of theta_dot values
 };
 
 #endif // DDPG_CONTROLLER_H

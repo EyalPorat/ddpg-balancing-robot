@@ -4,15 +4,16 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from tqdm import tqdm
+import collections
 from sklearn.preprocessing import KBinsDiscretizer
 
 from ..models import SimNet
 from ..environment import BalancerEnv
-from .utils import TrainingLogger, save_model, load_model
+from .utils import TrainingLogger, save_model
 
 
 class SimNetTrainer:
-    """Trainer for the dynamics simulation network."""
+    """Trainer for the dynamics simulation network with enhanced state support."""
 
     def __init__(
         self,
@@ -37,17 +38,34 @@ class SimNetTrainer:
         else:
             self.config = self._get_default_config()
 
-        # Initialize SimNet from config
+        # Get enhanced state parameters from env config
+        if hasattr(env, "config") and env.config:
+            self.theta_history_size = env.config["observation"].get("theta_history_size", 5)
+            self.action_history_size = env.config["observation"].get("action_history_size", 4)
+            self.motor_delay_steps = env.config["physics"].get("motor_delay_steps", 10)
+        else:
+            self.theta_history_size = 5
+            self.action_history_size = 4
+            self.motor_delay_steps = 10
+
+        # Calculate enhanced state dimension
+        # Basic state (3) + theta/theta_dot moving averages (2) + action history (n)
+        enhanced_state_dim = 3 + 2 + self.action_history_size
+
+        # Initialize SimNet from config with enhanced state dimension
         model_config = self.config["model"]
         self.simnet = SimNet(
-            state_dim=env.observation_space.shape[0],
+            state_dim=enhanced_state_dim,
             action_dim=env.action_space.shape[0],
             hidden_dims=model_config["hidden_dims"],
         ).to(device)
 
-        # Initialize optimizer and scheduler
-        self.optimizer = torch.optim.Adam(self.simnet.parameters())
+        # Initialize optimizer
+        self.optimizer = torch.optim.Adam(
+            self.simnet.parameters(), lr=self.config["training"]["pretrain"].get("learning_rate", 0.001)
+        )
 
+        # Set up scheduler
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             mode="min",
@@ -56,6 +74,11 @@ class SimNetTrainer:
             min_lr=self.config["training"]["pretrain"]["min_lr"],
             verbose=True,
         )
+
+        print(f"Initialized SimNetTrainer with enhanced state (dim={enhanced_state_dim})")
+        print(f"- theta_history_size: {self.theta_history_size}")
+        print(f"- action_history_size: {self.action_history_size}")
+        print(f"- motor_delay_steps: {self.motor_delay_steps}")
 
     def _get_default_config(self) -> Dict:
         """Return default configuration if none provided."""
@@ -107,9 +130,30 @@ class SimNetTrainer:
             },
         }
 
+    def _calculate_moving_average(self, history: collections.deque) -> float:
+        """Calculate moving average from history."""
+        return np.mean(history)
+
+    def _create_enhanced_state(
+        self,
+        theta: float,
+        theta_dot: float,
+        prev_action: float,
+        theta_history: collections.deque,
+        theta_dot_history: collections.deque,
+        action_history: collections.deque,
+    ) -> np.ndarray:
+        """Create enhanced state representation."""
+        # Calculate moving averages
+        theta_ma = self._calculate_moving_average(theta_history)
+        theta_dot_ma = self._calculate_moving_average(theta_dot_history)
+
+        # Create enhanced state
+        return np.concatenate([[theta, theta_dot, prev_action], [theta_ma, theta_dot_ma], np.array(action_history)])
+
     def collect_physics_data(self) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
         """
-        Collect data by:
+        Collect data with enhanced state representation by:
         1. Resetting the environment to its initial state
         2. Taking no action Episodes (letting the system fall on its own)
         3. Taking random action episodes (with noise)
@@ -119,27 +163,26 @@ class SimNetTrainer:
         config = self.config["data_collection"]
         num_samples = config["physics_samples"]
         action_noise_std = config["noise_std"]
-        observation_noise_std = config.get("observation_noise_std", 0.01)  # Default observation noise
+        observation_noise_std = config.get("observation_noise_std", 0.01)
 
         # Arrays to store transitions
         states, actions, next_states = [], [], []
 
-        # Decide how many steps to record per episode
+        # Steps per episode
         steps_per_episode = 500
 
         # Compute number of episodes for each type
-        # We'll have equal numbers of no-action and random-action episodes
         total_episodes = num_samples // steps_per_episode
         no_action_episodes = total_episodes // 3
         random_action_episodes = total_episodes - no_action_episodes
 
         # (1) "No action" episodes
         for _ in tqdm(range(no_action_episodes), desc="Collecting no-action physics data"):
-            # Reset environment
+            # Reset environment - already provides enhanced state
             state, _ = self.env.reset(should_zero_previous_action=True)
 
-            # Add initial observation noise only to physical components (theta, theta_dot)
-            state[:2] = state[:2] + np.random.normal(0, observation_noise_std, size=2)
+            # Add initial observation noise
+            state[:3] = state[:3] + np.random.normal(0, observation_noise_std, size=3)
 
             for _ in range(steps_per_episode):
                 s_t = state.copy()
@@ -163,7 +206,7 @@ class SimNetTrainer:
             state, _ = self.env.reset()
 
             # Add initial observation noise
-            state = state + np.random.normal(0, observation_noise_std, size=state.shape)
+            state[:3] = state[:3] + np.random.normal(0, observation_noise_std, size=3)
 
             for _ in range(steps_per_episode):
                 s_t = state.copy()
@@ -175,9 +218,6 @@ class SimNetTrainer:
                 a_t = np.clip(a_t + np.random.normal(0, action_noise_std, size=self.env.action_space.shape), -1, 1)
 
                 next_state, _, done, _, _ = self.env.step(a_t, action_as_actual_output=True)
-
-                # Add observation noise to next_state (only to physical components)
-                next_state[:2] = next_state[:2] + np.random.normal(0, observation_noise_std, size=2)
 
                 states.append(s_t)
                 actions.append(a_t)
@@ -215,11 +255,13 @@ class SimNetTrainer:
         return train_data, val_data
 
     def process_real_data(self, log_data: List[Dict[str, Any]]) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
-        """Process real robot log data for training.
+        """Process real robot log data for training with enhanced state representation.
+
         Args:
             log_data: List of logged data dictionaries
+
         Returns:
-            Tuple of (train_data, val_data) dictionaries
+            Tuple of (train_data, val_data) dictionaries with enhanced state
         """
         states = []
         actions = []
@@ -231,6 +273,11 @@ class SimNetTrainer:
         # For each episode in the log_data
         for episode in log_data:
             episode_states = episode["states"]
+
+            # Initialize history buffers for this episode
+            theta_history = collections.deque([0.0] * self.theta_history_size, maxlen=self.theta_history_size)
+            theta_dot_history = collections.deque([0.0] * self.theta_history_size, maxlen=self.theta_history_size)
+            action_history = collections.deque([0.0] * self.action_history_size, maxlen=self.action_history_size)
 
             # Process state transitions within each episode
             for i in range(len(episode_states) - 1):
@@ -264,8 +311,20 @@ class SimNetTrainer:
                     # We could either skip this state or use the current command as an approximation
                     prev_motor_command = float(current["motor_pwm"]) / 127.0  # This is a compromise
 
-                # Current state includes theta, theta_dot, and PREVIOUS motor command
-                state = np.array([current["theta_global"], current["theta_dot"], prev_motor_command])
+                # Update history buffers
+                theta = current["theta_global"]
+                theta_dot = current["theta_dot"]
+                theta_history.append(theta)
+                theta_dot_history.append(theta_dot)
+                action_history.append(prev_motor_command)
+
+                # Calculate basic state elements
+                basic_state = np.array([theta, theta_dot, prev_motor_command])
+
+                # Calculate enhanced state
+                enhanced_state = self._create_enhanced_state(
+                    theta, theta_dot, prev_motor_command, theta_history, theta_dot_history, action_history
+                )
 
                 # Current action is the motor command applied at the current timestep
                 action = np.array([current["motor_pwm"]]) / 127.0  # Normalize to [-1, 1]
@@ -273,11 +332,32 @@ class SimNetTrainer:
                 # Next state includes next theta, next theta_dot, and CURRENT motor command
                 # (which becomes the "previous" command for the next timestep)
                 current_motor_command = float(current["motor_pwm"]) / 127.0
-                next_state_array = np.array([next_state["theta_global"], next_state["theta_dot"], current_motor_command])
 
-                states.append(state)
+                # Update history for next state
+                next_theta = next_state["theta_global"]
+                next_theta_dot = next_state["theta_dot"]
+                next_theta_history = collections.deque(list(theta_history), maxlen=self.theta_history_size)
+                next_theta_dot_history = collections.deque(list(theta_dot_history), maxlen=self.theta_history_size)
+                next_action_history = collections.deque(list(action_history), maxlen=self.action_history_size)
+
+                # Update histories with new values
+                next_theta_history.append(next_theta)
+                next_theta_dot_history.append(next_theta_dot)
+                next_action_history.appendleft(current_motor_command)  # Put current command at front of history
+
+                # Create enhanced next state
+                enhanced_next_state = self._create_enhanced_state(
+                    next_theta,
+                    next_theta_dot,
+                    current_motor_command,
+                    next_theta_history,
+                    next_theta_dot_history,
+                    next_action_history,
+                )
+
+                states.append(enhanced_state)
                 actions.append(action)
-                next_states.append(next_state_array)
+                next_states.append(enhanced_next_state)
                 dt_factors.append(dt_factor)
 
         # Convert to arrays
@@ -292,12 +372,12 @@ class SimNetTrainer:
             state_changes = next_states - states
 
             # Scale down the state changes by the dt_factor to get consistent rate of change
-            # Only adjust the physical state components (theta, theta_dot), not the motor command
+            # Only adjust the physical state components (theta, theta_dot), not the enhanced state
             adjusted_next_states = np.copy(states)
             adjusted_next_states[:, :2] += state_changes[:, :2] / dt_factors[:, np.newaxis]
 
-            # Keep the motor command update as is (it's not affected by dt)
-            adjusted_next_states[:, 2] = next_states[:, 2]
+            # Keep the other enhanced state elements as they are
+            adjusted_next_states[:, 2:] = next_states[:, 2:]
 
             # Log statistics about time differences
             print(f"Time difference statistics:")
@@ -334,17 +414,8 @@ class SimNetTrainer:
 
     @staticmethod
     def calculate_class_weights(states: np.ndarray, num_bins: int = 10, strategy: str = "uniform") -> np.ndarray:
-        """Calculate class weights for balanced sampling based on state distribution.
-
-        Args:
-            states: Array of states to classify
-            num_bins: Number of bins for discretizing the state space
-            strategy: Binning strategy ('uniform', 'quantile', or 'kmeans')
-
-        Returns:
-            Array of sample weights corresponding to each state
-        """
-        # Only use the first two dimensions (theta and theta_dot) for binning
+        """Calculate class weights for balanced sampling based on state distribution."""
+        # Only use the basic state components (theta and theta_dot) for binning
         states_2d = states[:, :2]  # Extract just angle and angular velocity
 
         # Create discretizer for state binning
@@ -376,24 +447,15 @@ class SimNetTrainer:
     def create_balanced_dataset(
         data: Dict[str, np.ndarray], num_bins: int = 10, strategy: str = "uniform"
     ) -> Dict[str, np.ndarray]:
-        """Create a balanced dataset using oversampling of minority classes.
-
-        Args:
-            data: Dictionary containing training data
-            num_bins: Number of bins for discretizing the state space
-            strategy: Binning strategy ('uniform', 'quantile', or 'kmeans')
-
-        Returns:
-            Dictionary containing balanced training data
-        """
+        """Create a balanced dataset using oversampling of minority classes."""
         states = data["states"]
         actions = data["actions"]
         next_states = data["next_states"]
 
-        # Create discretizer
+        # Create discretizer (using just theta and theta_dot)
         discretizer = KBinsDiscretizer(n_bins=num_bins, encode="ordinal", strategy=strategy)
 
-        # Discretize states to identify classes
+        # Discretize states to identify classes (use basic state elements)
         angle_bins = discretizer.fit_transform(states[:, 0].reshape(-1, 1))
         angular_vel_bins = discretizer.fit_transform(states[:, 1].reshape(-1, 1))
 
@@ -517,9 +579,12 @@ class SimNetTrainer:
         batch_size: int,
         class_balancing_thresholds: Optional[Dict[str, float]],
     ) -> Dict[str, float]:
-        """Train for one epoch with increased weights for extreme states."""
+        """Train for one epoch with full state prediction."""
         self.simnet.train()
         total_loss = 0
+        total_physics_loss = 0
+        total_cmd_loss = 0
+        total_history_loss = 0
         total_weighted_samples = 0
 
         # Pull out arrays for convenience
@@ -536,9 +601,8 @@ class SimNetTrainer:
             actions = torch.FloatTensor(actions_arr[idx]).to(self.device)
             target_next_states = torch.FloatTensor(next_states_arr[idx]).to(self.device)
 
-            # Compute target deltas (now working with deltas, not absolute states)
-            target_deltas = torch.zeros_like(target_next_states)
-            target_deltas[:, :2] = target_next_states[:, :2] - states[:, :2]
+            # Compute target deltas (the differences between target state and current state)
+            target_deltas = target_next_states - states
 
             # Predict deltas directly
             pred_deltas = self.simnet.predict_delta(states, actions)
@@ -547,7 +611,7 @@ class SimNetTrainer:
             # Create weight tensor, default weight = 1.0
             weights = torch.ones(states.shape[0], device=self.device)
 
-            # Convert angles from radians to degrees (for the 25 degree threshold)
+            # Convert angles from radians to degrees (for thresholds specified in degrees)
             angles_degrees = torch.abs(states[:, 0] * 180.0 / np.pi)
             angular_vels = torch.abs(states[:, 1])
 
@@ -571,10 +635,17 @@ class SimNetTrainer:
                 # Count weighted samples for logging
                 total_weighted_samples += extreme_samples.sum().item()
 
-            # Compute weighted MSE loss on deltas
-            squared_errors = (pred_deltas[:, :2] - target_deltas[:, :2]) ** 2
-            # Apply weights to each sample's loss - expand weights to match squared_errors dimensions
-            weighted_errors = weights.unsqueeze(1) * squared_errors
+            # Create component weights - prioritize physics components
+            component_weights = torch.ones_like(pred_deltas)
+            component_weights[:, 2:] = 0.5  # Lower weight for non-physics components
+
+            # Compute weighted MSE loss on all delta components
+            squared_errors = (pred_deltas - target_deltas) ** 2
+
+            # Apply both sample weights and component weights
+            sample_weights = weights.unsqueeze(1)  # Reshape for broadcasting
+            weighted_errors = sample_weights * component_weights * squared_errors
+
             loss = weighted_errors.mean()
 
             self.optimizer.zero_grad()
@@ -583,42 +654,94 @@ class SimNetTrainer:
 
             total_loss += loss.item()
 
+            # Track individual component losses for monitoring
+            physics_loss = torch.nn.functional.mse_loss(pred_deltas[:, :2], target_deltas[:, :2])
+            cmd_loss = (
+                torch.nn.functional.mse_loss(pred_deltas[:, 2], target_deltas[:, 2]) if pred_deltas.shape[1] > 2 else 0
+            )
+
+            # Average loss for all remaining components if they exist
+            if pred_deltas.shape[1] > 3:
+                history_loss = torch.nn.functional.mse_loss(pred_deltas[:, 3:], target_deltas[:, 3:])
+            else:
+                history_loss = 0
+
+            total_physics_loss += physics_loss.item()
+            total_cmd_loss += cmd_loss.item() if not isinstance(cmd_loss, int) else 0
+            total_history_loss += history_loss.item() if not isinstance(history_loss, int) else 0
+
         return {
             "train_loss": total_loss / num_batches,
-            "extreme_samples_percent": (total_weighted_samples / num_samples) * 100,
+            "physics_loss": total_physics_loss / num_batches,
+            "cmd_loss": total_cmd_loss / num_batches,
+            "history_loss": total_history_loss / num_batches,
+            "extreme_samples_percent": (
+                (total_weighted_samples / (num_batches * batch_size)) * 100 if total_weighted_samples > 0 else 0
+            ),
         }
 
     def validate(self, val_data: Dict[str, np.ndarray], batch_size: int) -> Dict[str, float]:
-        """Validate the model on delta predictions."""
+        """Validate the model on full state delta predictions."""
         self.simnet.eval()
         total_loss = 0
+        total_physics_loss = 0
+        total_cmd_loss = 0
+        total_history_loss = 0
 
         states_arr = val_data["states"]
         actions_arr = val_data["actions"]
         next_states_arr = val_data["next_states"]
 
         num_samples = len(states_arr)
-        num_batches = num_samples // batch_size
+        num_batches = max(1, num_samples // batch_size)
 
         with torch.no_grad():
             for i in range(num_batches):
-                idx = slice(i * batch_size, (i + 1) * batch_size)
+                idx = slice(i * batch_size, min((i + 1) * batch_size, num_samples))
                 states = torch.FloatTensor(states_arr[idx]).to(self.device)
                 actions = torch.FloatTensor(actions_arr[idx]).to(self.device)
                 target_next_states = torch.FloatTensor(next_states_arr[idx]).to(self.device)
 
                 # Calculate target deltas
-                target_deltas = torch.zeros_like(target_next_states)
-                target_deltas[:, :2] = target_next_states[:, :2] - states[:, :2]
+                target_deltas = target_next_states - states
 
                 # Get delta predictions
                 pred_deltas = self.simnet.predict_delta(states, actions)
 
-                # Compute loss on first two dimensions only (theta, theta_dot)
-                loss = torch.nn.functional.mse_loss(pred_deltas[:, :2], target_deltas[:, :2])
+                # Compute weighted MSE loss
+                component_weights = torch.ones_like(pred_deltas)
+                component_weights[:, 2:] = 0.5  # Lower weight for non-physics components
+
+                squared_errors = (pred_deltas - target_deltas) ** 2
+                weighted_errors = component_weights * squared_errors
+                loss = weighted_errors.mean()
+
                 total_loss += loss.item()
 
-        return {"val_loss": total_loss / num_batches}
+                # Track individual component losses for monitoring
+                physics_loss = torch.nn.functional.mse_loss(pred_deltas[:, :2], target_deltas[:, :2])
+                cmd_loss = (
+                    torch.nn.functional.mse_loss(pred_deltas[:, 2], target_deltas[:, 2])
+                    if pred_deltas.shape[1] > 2
+                    else 0
+                )
+
+                # Average loss for all remaining components if they exist
+                if pred_deltas.shape[1] > 3:
+                    history_loss = torch.nn.functional.mse_loss(pred_deltas[:, 3:], target_deltas[:, 3:])
+                else:
+                    history_loss = 0
+
+                total_physics_loss += physics_loss.item()
+                total_cmd_loss += cmd_loss.item() if not isinstance(cmd_loss, int) else 0
+                total_history_loss += history_loss.item() if not isinstance(history_loss, int) else 0
+
+        return {
+            "val_loss": total_loss / num_batches,
+            "val_physics_loss": total_physics_loss / num_batches,
+            "val_cmd_loss": total_cmd_loss / num_batches,
+            "val_history_loss": total_history_loss / num_batches,
+        }
 
     @staticmethod
     def analyze_class_distribution(
@@ -732,5 +855,7 @@ class SimNetTrainer:
 
         if logger:
             logger.save()
+            if log_dir:
+                save_model(self.simnet, Path(log_dir) / "simnet_final.pt")
 
         return logger.metrics if logger else {}

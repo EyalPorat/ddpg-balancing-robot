@@ -2,7 +2,7 @@
 
 # Model architecture
 model:
-  hidden_dims: [32, 32, 32]
+  hidden_dims: [64, 64, 64]
   dropout_rate: 0.25
   activation: "relu"
   layer_norm: true

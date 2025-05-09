@@ -21,7 +21,7 @@ def main():
         "--type",
         type=str,
         default="all",
-        choices=["all", "basic", "performance", "comparison", "trajectory", "trajectory_heatmap_overlay"],
+        choices=["all", "basic", "performance", "comparison", "trajectory", "trajectory_heatmap_overlay", "free_fall"],
         help="Type of analysis to run",
     )
     parser.add_argument("--device", type=str, default="cpu", help="Device to run on (cpu/cuda)")
@@ -64,6 +64,8 @@ def main():
         analyzer.analyze_simulated_trajectories()
     elif args.type == "trajectory_heatmap_overlay":
         analyzer.create_trajectory_heatmap_overlay()
+        analyzer.create_natural_trajectory_overlay()
+    elif args.type == "free_fall":
         analyzer.create_natural_trajectory_overlay()
 
     print(f"Analysis complete. Results saved to {args.output}")

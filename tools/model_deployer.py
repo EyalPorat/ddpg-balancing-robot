@@ -39,7 +39,7 @@ class ModelDeployer:
             bias = first_layer.bias.data.cpu().numpy()
 
             # Write L1 shape
-            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 10x3 for the first layer
+            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 10x9 for the first layer (enhanced state)
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
@@ -72,7 +72,7 @@ class ModelDeployer:
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
-            logger.info(f"Weight file created with structure: L1(10x3) -> L2(10x10) -> L3(1x10)")
+            logger.info(f"Weight file created with structure: L1(10x9) -> L2(10x10) -> L3(1x10)")
 
     def verify_weights_file(self, filename: str) -> bool:
         """Verify exported weights file structure."""
@@ -82,11 +82,11 @@ class ModelDeployer:
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L1 shape: {rows}x{cols}")
 
-                # We expect 10x3 for the first layer
-                if cols != 3:
-                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x3")
+                # We expect 10x9 for the first layer
+                if cols != 9:
+                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x9 (enhanced state)")
                 if rows != 10:
-                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x3")
+                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x9")
 
                 # Skip weights and biases
                 f.seek(rows * cols * 4 + rows * 4, 1)  # float32 = 4 bytes
@@ -151,6 +151,12 @@ class ModelDeployer:
             return False
 
 
+def load_config(config_path: str) -> Dict[str, Any]:
+    """Load configuration from file."""
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Deploy model to robot")
     parser.add_argument("--model", type=str, required=True, help="Path to model checkpoint")
@@ -160,14 +166,26 @@ def main():
 
     args = parser.parse_args()
 
-    # Load model and config
-    with open(args.config, "r") as f:
-        config = yaml.safe_load(f)
+    # Load config to get state dimensions
+    config = load_config(args.config)
 
-    # Create model with 3D state input (includes prev_motor_command)
+    # Determine state dimension from config
+    state_dim = 9  # Default enhanced state size
+
+    # Check if we have observation parameters
+    if "observation" in config:
+        # Basic state (3) + moving averages (2) + action history
+        action_history_size = config["observation"].get("action_history_size", 4)
+        state_dim = 3 + 2 + action_history_size
+        logger.info(f"Using state dimension from config: {state_dim}")
+    else:
+        logger.info(f"Using default enhanced state dimension: {state_dim}")
+
+    # Create model with enhanced state input
     # We always use max_action=1.0 for the actor, as actions are normalized to [-1, 1]
     # The scaling to actual PWM values happens in the embedded controller
-    actor = Actor(state_dim=3, action_dim=1, max_action=1.0, hidden_dims=(10, 10))
+    logger.info(f"Creating model with state_dim={state_dim}, action_dim=1, max_action=1.0")
+    actor = Actor(state_dim=state_dim, action_dim=1, max_action=1.0, hidden_dims=(10, 10))
 
     # Load saved weights
     checkpoint = torch.load(args.model, map_location=torch.device("cpu"))

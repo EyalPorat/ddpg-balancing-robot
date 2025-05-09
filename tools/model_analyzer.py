@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import seaborn as sns
+import collections
 from pathlib import Path
 from tqdm import tqdm
 import matplotlib as mpl
@@ -20,7 +21,7 @@ from python.src.balancing_robot.environment import BalancerEnv
 
 
 class ModelAnalyzer:
-    """Analyze trained balancing robot models."""
+    """Analyze trained balancing robot models with enhanced state support."""
 
     def __init__(self, model_path, env_config_path, ddpg_config_path=None, output_dir="analysis_results", device="cpu"):
         """Initialize model analyzer.
@@ -58,13 +59,21 @@ class ModelAnalyzer:
             self.config.update(self.ddpg_config)
         self.config.update(self.env_config)
 
-        # Initialize model
+        # Get enhanced state parameters
+        self.theta_history_size = self.env_config["observation"].get("theta_history_size", 5)
+        self.action_history_size = self.env_config["observation"].get("action_history_size", 4)
+        self.motor_delay_steps = self.env_config["physics"].get("motor_delay_steps", 10)
+
+        # Calculate enhanced state dimension
+        self.enhanced_state_dim = 3 + 2 + self.action_history_size  # Basic state + moving averages + action history
+        print(f"Using enhanced state representation with dimension: {self.enhanced_state_dim}")
+
+        # Initialize model with enhanced state size
         self.actor = self._load_model()
 
-        # Initialize and load SimNet
-        self.simnet = SimNet(state_dim=3, action_dim=1, hidden_dims=(32, 32, 32))
+        # Initialize and load SimNet with enhanced state
+        self.simnet = SimNet(state_dim=self.enhanced_state_dim, action_dim=1, hidden_dims=(32, 32, 32))
         self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/simnet_final.pt")["state_dict"])
-        # self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/physics/best_simnet.pt")["state_dict"])
         self.simnet.to(device)
         self.simnet.eval()  # Set to evaluation mode
 
@@ -94,9 +103,9 @@ class ModelAnalyzer:
             self.phase_theta_dot_range = np.linspace(-4, 4, 20)  # -4 to 4 rad/s
 
     def _load_model(self):
-        """Load the model from checkpoint."""
+        """Load the model from checkpoint with enhanced state support."""
         # Get model architecture from DDPG config if available
-        hidden_dims = (8, 8)  # Default architecture
+        hidden_dims = (64, 64)  # Default architecture
 
         if self.ddpg_config and "model" in self.ddpg_config and "actor" in self.ddpg_config["model"]:
             hidden_dims = self.ddpg_config["model"]["actor"].get("hidden_dims", hidden_dims)
@@ -105,10 +114,14 @@ class ModelAnalyzer:
         # Scaling to physical torque happens in the environment
         max_action = 1.0
 
-        # Create actor model (3 inputs - theta, theta_dot, prev_motor_command)
-        actor = Actor(state_dim=3, action_dim=1, max_action=max_action, hidden_dims=hidden_dims).to(self.device)
+        # Create actor model with enhanced state dimension
+        actor = Actor(
+            state_dim=self.enhanced_state_dim, action_dim=1, max_action=max_action, hidden_dims=hidden_dims
+        ).to(self.device)
 
-        print(f"Loading model with architecture: state_dim=3, action_dim=1, hidden_dims={hidden_dims}")
+        print(
+            f"Loading model with architecture: state_dim={self.enhanced_state_dim}, action_dim=1, hidden_dims={hidden_dims}"
+        )
         print(f"Using normalized action space with max_action=1.0")
 
         # Load weights
@@ -118,20 +131,50 @@ class ModelAnalyzer:
 
         return actor
 
-    def predict_actions(self, states):
-        """Predict actions for given states."""
-        with torch.no_grad():
-            # Add dummy prev_motor_command (0.0) if the provided states are 2D
-            states = np.asarray(states)
-            if states.shape[1] == 2:
-                # Add a column of zeros for prev_motor_command
-                prev_motor_command = np.zeros((states.shape[0], 1))
-                states_3d = np.concatenate([states, prev_motor_command], axis=1)
-            else:
-                states_3d = states
+    def _create_enhanced_state(self, theta, theta_dot, prev_cmd=0.0):
+        """Create an enhanced state vector with proper history elements."""
+        # Create moving averages (just use raw values for simplicity)
+        theta_ma = theta
+        theta_dot_ma = theta_dot
 
-            states_tensor = torch.FloatTensor(states_3d).to(self.device)
-            actions = self.actor(states_tensor).cpu().numpy()
+        # Create action history (all set to prev_cmd for simplicity)
+        action_history = np.ones(self.action_history_size) * prev_cmd
+
+        # Combine into enhanced state
+        return np.concatenate(
+            [
+                [theta, theta_dot, prev_cmd],  # Basic state
+                [theta_ma, theta_dot_ma],  # Moving averages
+                action_history,  # Action history
+            ]
+        )
+
+    def predict_actions(self, states):
+        """Predict actions for given states, handling enhanced state representation."""
+        with torch.no_grad():
+            # Convert to enhanced states if necessary
+            enhanced_states = []
+            for state in states:
+                if len(state) < self.enhanced_state_dim:
+                    # If basic state provided, expand to enhanced state
+                    if len(state) == 3:
+                        theta, theta_dot, prev_cmd = state
+                    elif len(state) == 2:
+                        theta, theta_dot = state
+                        prev_cmd = 0.0  # Default prev_cmd
+                    else:
+                        raise ValueError(f"Unexpected state dimension: {len(state)}")
+
+                    enhanced_state = self._create_enhanced_state(theta, theta_dot, prev_cmd)
+                    enhanced_states.append(enhanced_state)
+                else:
+                    # Already enhanced
+                    enhanced_states.append(state)
+
+            enhanced_states = np.array(enhanced_states)
+            enhanced_states_tensor = torch.FloatTensor(enhanced_states).to(self.device)
+            actions = self.actor(enhanced_states_tensor).cpu().numpy()
+
         return actions
 
     def create_action_heatmap(self, prev_cmd=0.0):
@@ -141,17 +184,16 @@ class ModelAnalyzer:
         # Create meshgrid of states
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
 
-        # Create 3D states with fixed prev_cmd
-        states_3d = np.column_stack(
-            (
-                theta_mesh.flatten(),
-                theta_dot_mesh.flatten(),
-                np.ones(theta_mesh.size) * prev_cmd,  # Fixed previous command
-            )
-        )
+        # Create enhanced states for each grid point
+        states = []
+        for theta, theta_dot in zip(theta_mesh.flatten(), theta_dot_mesh.flatten()):
+            enhanced_state = self._create_enhanced_state(theta, theta_dot, prev_cmd)
+            states.append(enhanced_state)
+
+        states = np.array(states)
 
         # Predict actions
-        actions = self.predict_actions(states_3d)
+        actions = self.predict_actions(states)
         action_mesh = actions.reshape(theta_mesh.shape)
 
         # Plot heatmap
@@ -201,7 +243,16 @@ class ModelAnalyzer:
         for idx, prev_cmd in enumerate(prev_cmd_values):
             ax = axes.flat[idx]
             Θ, 𝑤 = np.meshgrid(self.theta_range, self.theta_dot_range)
-            states = np.column_stack([Θ.flatten(), 𝑤.flatten(), np.full(Θ.size, prev_cmd)])
+
+            # Create enhanced states
+            states = []
+            for theta, theta_dot in zip(Θ.flatten(), 𝑤.flatten()):
+                enhanced_state = self._create_enhanced_state(theta, theta_dot, prev_cmd)
+                states.append(enhanced_state)
+
+            states = np.array(states)
+
+            # Get predictions
             data = self.predict_actions(states).reshape(Θ.shape)
 
             im = ax.pcolormesh(
@@ -226,34 +277,31 @@ class ModelAnalyzer:
         plt.close(fig)
 
     def create_phase_space_plot(self):
-        """Create phase space plot with velocity fields using SimNet."""
+        """Create phase space plot with velocity fields using SimNet with enhanced state."""
         print("Creating phase space plot...")
 
         # Create meshgrid for phase space
         theta_mesh, theta_dot_mesh = np.meshgrid(self.phase_theta_range, self.phase_theta_dot_range)
 
-        # Prepare states for prediction
-        states = np.column_stack(
-            (
-                theta_mesh.flatten(),
-                theta_dot_mesh.flatten(),
-                np.zeros(theta_mesh.size),  # Initialize prev_action to zero
-            )
-        )
+        # Create enhanced states for each grid point
+        states = []
+        for theta, theta_dot in zip(theta_mesh.flatten(), theta_dot_mesh.flatten()):
+            enhanced_state = self._create_enhanced_state(theta, theta_dot, 0.0)
+            states.append(enhanced_state)
+
+        states = np.array(states)
 
         # Predict actions
         actions = self.predict_actions(states)
 
-        # Calculate accelerations using delta-based SimNet
+        # Calculate accelerations using SimNet
         accelerations = []
         for state, action in zip(states, actions):
-            self.env.reset(state=state)  # Reset environment to the current state
-
-            # Convert state and action to tensors for SimNet
+            # Convert to tensors for SimNet
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            action_tensor = torch.FloatTensor(action).unsqueeze(0).to(self.device)
+            action_tensor = torch.FloatTensor([action]).unsqueeze(0).to(self.device)
 
-            # Get delta predictions directly from SimNet
+            # Get delta predictions from SimNet
             with torch.no_grad():
                 delta_state = self.simnet.predict_delta(state_tensor, action_tensor)
                 delta_theta_dot = delta_state[0, 1].item()  # Grab the angular velocity delta
@@ -294,7 +342,7 @@ class ModelAnalyzer:
         plt.colorbar(label="Velocity Magnitude")
         plt.xlabel("Angle θ (degrees)")
         plt.ylabel("Angular Velocity θ̇ (rad/s)")
-        plt.title("Phase Space Dynamics (Delta-based SimNet)")
+        plt.title("Phase Space Dynamics (Enhanced State SimNet)")
         plt.axhline(y=0, color="k", linestyle="--", alpha=0.3)
         plt.axvline(x=0, color="k", linestyle="--", alpha=0.3)
         plt.grid(alpha=0.3)
@@ -831,8 +879,17 @@ class ModelAnalyzer:
 
         # — 1) Heatmap background
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
-        states3 = np.column_stack((theta_mesh.flatten(), theta_dot_mesh.flatten(), np.ones(theta_mesh.size) * prev_cmd))
-        action_mesh = self.predict_actions(states3).reshape(theta_mesh.shape)
+
+        # Create enhanced states for heatmap
+        states = []
+        for theta, theta_dot in zip(theta_mesh.flatten(), theta_dot_mesh.flatten()):
+            enhanced_state = self._create_enhanced_state(theta, theta_dot, prev_cmd)
+            states.append(enhanced_state)
+
+        states = np.array(states)
+
+        # Get action predictions
+        action_mesh = self.predict_actions(states).reshape(theta_mesh.shape)
 
         fig, ax = plt.subplots(figsize=(12, 10))
         theta_deg = self.theta_range * 180.0 / np.pi
@@ -865,15 +922,47 @@ class ModelAnalyzer:
         for idx, (θ0, ω0) in enumerate(starts):
             color = cmap(idx % cmap.N)
             traj = []
-            state, _ = self.env.reset(state=np.array([θ0, ω0, prev_cmd]))
+
+            # Initial enhanced state
+            enhanced_state = self._create_enhanced_state(θ0, ω0, prev_cmd)
+
+            # Initialize history buffers
+            theta_history = collections.deque([θ0] * self.theta_history_size, maxlen=self.theta_history_size)
+            theta_dot_history = collections.deque([ω0] * self.theta_history_size, maxlen=self.theta_history_size)
+            action_history = collections.deque([prev_cmd] * self.action_history_size, maxlen=self.action_history_size)
+
             for _ in range(max_steps):
-                ang_d = state[0] * 180.0 / np.pi
-                vel = state[1]
+                # Get current basic state values
+                theta = enhanced_state[0]
+                theta_dot = enhanced_state[1]
+
+                # Convert theta to degrees for plotting
+                ang_d = theta * 180.0 / np.pi
+                vel = theta_dot
+
+                # Check if still in range
                 if not (θ_min <= ang_d <= θ_max and ω_min <= vel <= ω_max):
                     break
+
                 traj.append((ang_d, vel))
-                action = self.predict_actions([state])[0]
-                state, _, _, _, _ = self.env.step(action)
+
+                with torch.no_grad():
+                    # Get action for current state
+                    state_tensor = torch.FloatTensor(enhanced_state).unsqueeze(0).to(self.device)
+                    action = self.actor(state_tensor).cpu().numpy()[0][0]
+
+                # Update history buffers
+                theta_history.append(theta)
+                theta_dot_history.append(theta_dot)
+                action_history.appendleft(action)  # Add newest action at front
+
+                # Predict next state using SimNet
+                action_tensor = torch.FloatTensor([action]).unsqueeze(0).to(self.device)
+
+                with torch.no_grad():
+                    next_state = self.simnet(state_tensor, action_tensor).cpu().numpy()[0]
+
+                enhanced_state = next_state
 
             if len(traj) < 2:
                 continue
@@ -909,7 +998,7 @@ class ModelAnalyzer:
 
         ax.set_xlabel("Angle θ (deg)")
         ax.set_ylabel("Angular Velocity θ̇ (rad/s)")
-        ax.set_title(f"Action Heatmap (prev_cmd={prev_cmd}) with Trajectories")
+        ax.set_title(f"Action Heatmap (prev_cmd={prev_cmd}) with Trajectories (Enhanced State)")
 
         plt.tight_layout()
         plt.savefig(self.output_dir / f"traj_over_heatmap_prev_cmd_{prev_cmd}.png", dpi=300)
@@ -917,15 +1006,7 @@ class ModelAnalyzer:
         print("Trajectory-overlay heatmap saved.")
 
     def create_natural_trajectory_overlay(self, grid_size=10, max_steps=100):
-        """Plot trajectory heatmap without any control actions (natural dynamics only).
-
-        This shows where the robot would fall without any control, revealing the
-        natural dynamics of the system.
-
-        Args:
-            grid_size: Number of starting points in each dimension
-            max_steps: Maximum simulation steps for each trajectory
-        """
+        """Plot trajectory heatmap without any control actions (natural dynamics only)."""
         print("Creating natural dynamics trajectory overlay...")
 
         fig, ax = plt.subplots(figsize=(12, 10))
@@ -957,11 +1038,23 @@ class ModelAnalyzer:
         for idx, (θ0, ω0) in enumerate(starts):
             color = cmap(idx % cmap.N)
             traj = []
-            state, _ = self.env.reset(state=np.array([θ0, ω0, 0.0]))
+
+            # Initialize enhanced state with zero action
+            enhanced_state = self._create_enhanced_state(θ0, ω0, 0.0)
+
+            # Initialize history buffers
+            theta_history = collections.deque([θ0] * self.theta_history_size, maxlen=self.theta_history_size)
+            theta_dot_history = collections.deque([ω0] * self.theta_history_size, maxlen=self.theta_history_size)
+            action_history = collections.deque([0.0] * self.action_history_size, maxlen=self.action_history_size)
 
             for step in range(max_steps):
-                ang_d = state[0] * 180.0 / np.pi  # Convert to degrees
-                vel = state[1]
+                # Get current state values
+                theta = enhanced_state[0]
+                theta_dot = enhanced_state[1]
+
+                # Convert to degrees for plotting
+                ang_d = theta * 180.0 / np.pi
+                vel = theta_dot
 
                 # Check if still in drawable range
                 if not (θ_min <= ang_d <= θ_max and ω_min <= vel <= ω_max):
@@ -970,10 +1063,24 @@ class ModelAnalyzer:
                 traj.append((ang_d, vel))
 
                 # Apply ZERO action (natural dynamics)
-                action = np.array([0.0])
-                state, _, done, _, _ = self.env.step(action)
+                action = 0.0
 
-                if done:
+                # Update history buffers
+                theta_history.append(theta)
+                theta_dot_history.append(theta_dot)
+                action_history.appendleft(action)  # Add newest action at front
+
+                # Predict next state using SimNet with zero action
+                state_tensor = torch.FloatTensor(enhanced_state).unsqueeze(0).to(self.device)
+                action_tensor = torch.FloatTensor([[action]]).to(self.device)
+
+                with torch.no_grad():
+                    next_state = self.simnet(state_tensor, action_tensor).cpu().numpy()[0]
+
+                enhanced_state = next_state
+
+                # Check if state is diverging
+                if abs(enhanced_state[0]) > np.pi:
                     break
 
             # Only plot if we have enough points
@@ -1027,7 +1134,7 @@ class ModelAnalyzer:
         # Final styling
         ax.set_xlabel("Angle θ (deg)")
         ax.set_ylabel("Angular Velocity θ̇ (rad/s)")
-        ax.set_title("Natural Dynamics Trajectories (No Control)")
+        ax.set_title("Natural Dynamics Trajectories (No Control) - Enhanced State")
 
         # Add legend explaining markers
         legend_elements = [
@@ -1061,7 +1168,6 @@ class ModelAnalyzer:
         self.analyze_simulated_trajectories()
         self.create_trajectory_heatmap_overlay(prev_cmd=0.0)
         self.create_natural_trajectory_overlay()
-        self.generate_comparative_pd_controller()
 
         print("\nComplete analysis finished. Results saved to:", self.output_dir)
 
@@ -1079,7 +1185,7 @@ class ModelAnalyzer:
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Balancing Robot Model Analysis</title>
+            <title>Enhanced State Balancing Robot Model Analysis</title>
             <style>
                 body {
                     font-family: Arial, sans-serif;
@@ -1116,14 +1222,28 @@ class ModelAnalyzer:
                     border-bottom: 1px solid #eee;
                     padding-bottom: 20px;
                 }
+                .enhanced-state-info {
+                    background-color: #f0f7ff;
+                    padding: 15px;
+                    border-radius: 5px;
+                    margin-bottom: 20px;
+                }
             </style>
         </head>
         <body>
-            <h1>Balancing Robot Model Analysis</h1>
-            <p>Analysis of the trained DDPG controller for the balancing robot.</p>
-            <p>Note: All controller actions are normalized to [-1, 1] range. In the actual robot, 
-            these values are scaled to appropriate PWM values or torques.</p>
-        """
+            <h1>Enhanced State Balancing Robot Model Analysis</h1>
+            <div class="enhanced-state-info">
+                <p>Analysis of the trained DDPG controller using enhanced state representation. Enhanced state includes:</p>
+                <ul>
+                    <li>Basic state: theta, theta_dot, prev_action</li>
+                    <li>Moving averages: theta_ma, theta_dot_ma</li>
+                    <li>Action history: Last {0} motor commands</li>
+                </ul>
+                <p>All actions are normalized to [-1, 1] range, with motor delay compensation built into the control policy.</p>
+            </div>
+        """.format(
+            self.action_history_size
+        )
 
         # Group images by category based on filename
         categories = {
