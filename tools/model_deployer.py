@@ -38,8 +38,8 @@ class ModelDeployer:
             weights = first_layer.weight.data.cpu().numpy()
             bias = first_layer.bias.data.cpu().numpy()
 
-            # Write L1 shape
-            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 10x9 for the first layer (enhanced state)
+            # Write L1 shape - now 10x12 for new state structure
+            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
@@ -72,7 +72,7 @@ class ModelDeployer:
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
-            logger.info(f"Weight file created with structure: L1(10x9) -> L2(10x10) -> L3(1x10)")
+            logger.info(f"Weight file created with structure: L1(10x12) -> L2(10x10) -> L3(1x10)")
 
     def verify_weights_file(self, filename: str) -> bool:
         """Verify exported weights file structure."""
@@ -82,11 +82,11 @@ class ModelDeployer:
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L1 shape: {rows}x{cols}")
 
-                # We expect 10x9 for the first layer
-                if cols != 9:
-                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x9 (enhanced state)")
+                # We expect 10x12 for the new state structure
+                if cols != 12:
+                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x12 (new enhanced state)")
                 if rows != 10:
-                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x9")
+                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x12")
 
                 # Skip weights and biases
                 f.seek(rows * cols * 4 + rows * 4, 1)  # float32 = 4 bytes
@@ -170,20 +170,22 @@ def main():
     config = load_config(args.config)
 
     # Determine state dimension from config
-    state_dim = 9  # Default enhanced state size (3 basic + 2 moving avg + 4 history)
+    state_dim = 12  # Default enhanced state size (2 basic + 4 action + 3 theta + 3 theta_dot)
 
     # Check if we have observation parameters
     if "observation" in config:
-        # Basic state (3) + moving averages (2) + action history
+        # Basic state (2) + action history + theta history + theta_dot history
         action_history_size = config["observation"].get("action_history_size", 4)
-        state_dim = 3 + 2 + action_history_size
+        theta_history_size = config["observation"].get("theta_history_size", 3)
+        theta_dot_history_size = config["observation"].get("theta_dot_history_size", 3)
+        state_dim = 2 + action_history_size + theta_history_size + theta_dot_history_size
         logger.info(f"Using state dimension from config: {state_dim}")
         logger.info(
-            f"State structure: theta, theta_dot, prev_action, theta_ma, theta_dot_ma, action_history[{action_history_size}]"
+            f"State structure: theta, theta_dot, action_history[{action_history_size}], theta_history[{theta_history_size}], theta_dot_history[{theta_dot_history_size}]"
         )
     else:
         logger.info(f"Using default enhanced state dimension: {state_dim}")
-        logger.info("State structure: theta, theta_dot, prev_action, theta_ma, theta_dot_ma, action_history[4]")
+        logger.info("State structure: theta, theta_dot, action_history[4], theta_history[3], theta_dot_history[3]")
 
     # Create model with enhanced state input
     # We always use max_action=1.0 for the actor, as actions are normalized to [-1, 1]
@@ -207,7 +209,7 @@ def main():
         for key in actor.state_dict().keys():
             logger.error(f"  {key}")
         logger.error("This may indicate a state dimension mismatch between the saved model and your config.")
-        logger.error("Check that your action_history_size and other state components match.")
+        logger.error("Check that your history sizes match between training and deployment.")
         sys.exit(1)
 
     # Verify input layer matches state dimensions

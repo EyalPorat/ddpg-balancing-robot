@@ -33,7 +33,8 @@ observation:
   angular_velocity_limit: 8.0  # rad/s
   
   # Enhanced state parameters
-  theta_history_size: 5       # Size of theta history for moving average
+  theta_history_size: 3       # Number of previous theta values to store
+  theta_dot_history_size: 3   # Number of previous theta_dot values to store
   action_history_size: 4      # Number of previous action values to store
 
   noise_std: 0.015  # observation noise

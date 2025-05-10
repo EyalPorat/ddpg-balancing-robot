@@ -9,12 +9,12 @@ class SimNet(nn.Module):
     """Neural network for simulating system dynamics."""
 
     def __init__(
-        self, state_dim: int, action_dim: int, hidden_dims: Tuple[int, ...] = (128, 128), learning_rate: float = 1e-3
+        self, state_dim: int, action_dim: int, hidden_dims: Tuple[int, ...] = (64, 64, 64), learning_rate: float = 1e-3
     ):
         """Initialize simulation network.
 
         Args:
-            state_dim: Dimension of state space (including enhanced features)
+            state_dim: Dimension of state space (now 12 for enhanced state)
             action_dim: Dimension of action space
             hidden_dims: Dimensions of hidden layers
             learning_rate: Learning rate for optimizer
@@ -23,7 +23,7 @@ class SimNet(nn.Module):
 
         self.state_dim = state_dim
         self.action_dim = action_dim
-        self.basic_state_dim = 3  # The core state variables: theta, theta_dot, prev_action
+        self.basic_state_dim = 2  # The core state variables: theta, theta_dot
 
         # Network to predict delta state (change in state)
         layers = []
@@ -35,7 +35,7 @@ class SimNet(nn.Module):
 
         self.hidden_layers = nn.Sequential(*layers)
 
-        # Output delta state (change in the full state, not just basic components)
+        # Output delta state (change in the full state)
         self.output_layer = nn.Linear(prev_dim, state_dim)
 
         # Initialize weights
@@ -69,25 +69,17 @@ class SimNet(nn.Module):
         # Apply predicted deltas to the entire state
         next_state = next_state + delta_state
 
-        # The action component should be replaced with the current action
-        next_state[:, 2] = action.squeeze()
-
         # Update action history (shift actions)
-        # Assuming action history starts at index 5 and has length action_history_size
-        action_history_start = 5
+        # Assuming action history starts at index 2 and has length 4
+        action_history_start = 2
+        action_history_size = 4
 
-        # If there's an action history to update
-        if state.shape[1] > action_history_start:
-            action_history_size = state.shape[1] - action_history_start
-
-            # Add the new action to the beginning of history
-            if action_history_size > 0:
-                # Shift the action history, add new action at front
-                next_state[:, action_history_start] = action.squeeze()
-                if action_history_size > 1:
-                    next_state[:, action_history_start + 1 : action_history_start + action_history_size] = state[
-                        :, action_history_start : action_history_start + action_history_size - 1
-                    ]
+        # Add the new action at the beginning of history
+        next_state[:, action_history_start] = action.squeeze()
+        if action_history_size > 1:
+            next_state[:, action_history_start + 1 : action_history_start + action_history_size] = state[
+                :, action_history_start : action_history_start + action_history_size - 1
+            ]
 
         return next_state
 
@@ -140,14 +132,24 @@ class SimNet(nn.Module):
 
         # Calculate individual component metrics for monitoring
         physics_loss = F.mse_loss(pred_deltas[:, :2], target_deltas[:, :2])
-        cmd_loss = F.mse_loss(pred_deltas[:, 2], target_deltas[:, 2]) if pred_deltas.shape[1] > 2 else 0.0
-        history_loss = F.mse_loss(pred_deltas[:, 3:], target_deltas[:, 3:]) if pred_deltas.shape[1] > 3 else 0.0
+
+        # Calculate history losses separately
+        action_history_loss = (
+            F.mse_loss(pred_deltas[:, 2:6], target_deltas[:, 2:6]) if pred_deltas.shape[1] > 5 else 0.0
+        )
+        theta_history_loss = F.mse_loss(pred_deltas[:, 6:9], target_deltas[:, 6:9]) if pred_deltas.shape[1] > 8 else 0.0
+        theta_dot_history_loss = (
+            F.mse_loss(pred_deltas[:, 9:12], target_deltas[:, 9:12]) if pred_deltas.shape[1] > 11 else 0.0
+        )
 
         return {
             "loss": loss.item(),
             "physics_loss": physics_loss.item(),
-            "cmd_loss": cmd_loss.item() if not isinstance(cmd_loss, int) else 0.0,
-            "history_loss": history_loss.item() if not isinstance(history_loss, int) else 0.0,
+            "action_history_loss": action_history_loss.item() if not isinstance(action_history_loss, int) else 0.0,
+            "theta_history_loss": theta_history_loss.item() if not isinstance(theta_history_loss, int) else 0.0,
+            "theta_dot_history_loss": (
+                theta_dot_history_loss.item() if not isinstance(theta_dot_history_loss, int) else 0.0
+            ),
             "pred_delta_mean": pred_deltas.mean().item(),
             "pred_delta_std": pred_deltas.std().item(),
             "target_delta_mean": target_deltas.mean().item(),

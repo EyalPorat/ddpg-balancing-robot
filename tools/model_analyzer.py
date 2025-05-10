@@ -60,13 +60,14 @@ class ModelAnalyzer:
         self.config.update(self.env_config)
 
         # Get enhanced state parameters
-        self.theta_history_size = self.env_config["observation"].get("theta_history_size", 5)
+        self.theta_history_size = self.env_config["observation"].get("theta_history_size", 3)
+        self.theta_dot_history_size = self.env_config["observation"].get("theta_dot_history_size", 3)
         self.action_history_size = self.env_config["observation"].get("action_history_size", 4)
-        self.motor_delay_steps = self.env_config["physics"].get("motor_delay_steps", 10)
+        self.motor_delay_steps = self.env_config["physics"].get("motor_delay_steps", 2)
 
         # Calculate enhanced state dimension
-        # Basic state (3) + moving averages (2) + action history
-        self.enhanced_state_dim = 3 + 2 + self.action_history_size
+        # Basic state (2) + action history + theta history + theta_dot history
+        self.enhanced_state_dim = 2 + self.action_history_size + self.theta_history_size + self.theta_dot_history_size
         print(f"Using enhanced state representation with dimension: {self.enhanced_state_dim}")
 
         # Initialize model with enhanced state size
@@ -116,7 +117,7 @@ class ModelAnalyzer:
     def _load_model(self):
         """Load the model from checkpoint with enhanced state support."""
         # Get model architecture from DDPG config if available
-        hidden_dims = (64, 64)  # Default architecture
+        hidden_dims = (10, 10)  # Default architecture
 
         if self.ddpg_config and "model" in self.ddpg_config and "actor" in self.ddpg_config["model"]:
             hidden_dims = self.ddpg_config["model"]["actor"].get("hidden_dims", hidden_dims)
@@ -134,7 +135,7 @@ class ModelAnalyzer:
             f"Loading model with architecture: state_dim={self.enhanced_state_dim}, action_dim=1, hidden_dims={hidden_dims}"
         )
         print(
-            f"Enhanced state structure: theta, theta_dot, prev_action, theta_ma, theta_dot_ma, action_history[{self.action_history_size}]"
+            f"Enhanced state structure: theta, theta_dot, action_history[{self.action_history_size}], theta_history[{self.theta_history_size}], theta_dot_history[{self.theta_dot_history_size}]"
         )
         print(f"Using normalized action space with max_action=1.0")
 
@@ -158,26 +159,28 @@ class ModelAnalyzer:
         actor.eval()
         return actor
 
-    def _create_enhanced_state(self, theta, theta_dot, prev_cmd=0.0):
+    def _create_enhanced_state(self, theta, theta_dot, action_history=None, theta_history=None, theta_dot_history=None):
         """Create an enhanced state vector with proper history elements."""
-        # Create moving averages (just use raw values for simplicity)
-        theta_ma = theta
-        theta_dot_ma = theta_dot
+        # Initialize histories if not provided
+        if action_history is None:
+            action_history = np.zeros(self.action_history_size)
+        if theta_history is None:
+            theta_history = np.ones(self.theta_history_size) * theta
+        if theta_dot_history is None:
+            theta_dot_history = np.ones(self.theta_dot_history_size) * theta_dot
 
-        # Create action history (all set to prev_cmd for simplicity)
-        action_history = np.ones(self.action_history_size) * prev_cmd
-
-        # Combine into enhanced state - note explicit structure
+        # Combine into enhanced state
         enhanced_state = np.concatenate(
             [
-                [theta, theta_dot, prev_cmd],  # Basic state
-                [theta_ma, theta_dot_ma],  # Moving averages
-                action_history,  # Action history (self.action_history_size elements)
+                np.array([theta, theta_dot]),  # Basic state
+                np.array(action_history).flatten(),  # Action history
+                np.array(theta_history).flatten(),  # Theta history
+                np.array(theta_dot_history).flatten(),  # Theta_dot history
             ]
         )
 
         # Verify state dimension
-        expected_dim = 3 + 2 + self.action_history_size
+        expected_dim = 2 + self.action_history_size + self.theta_history_size + self.theta_dot_history_size
         if len(enhanced_state) != expected_dim:
             raise ValueError(f"Enhanced state dimension mismatch. Got {len(enhanced_state)}, expected {expected_dim}")
 
@@ -191,15 +194,11 @@ class ModelAnalyzer:
             for state in states:
                 if len(state) < self.enhanced_state_dim:
                     # If basic state provided, expand to enhanced state
-                    if len(state) == 3:
-                        theta, theta_dot, prev_cmd = state
-                    elif len(state) == 2:
+                    if len(state) == 2:
                         theta, theta_dot = state
-                        prev_cmd = 0.0  # Default prev_cmd
+                        enhanced_state = self._create_enhanced_state(theta, theta_dot)
                     else:
                         raise ValueError(f"Unexpected state dimension: {len(state)}")
-
-                    enhanced_state = self._create_enhanced_state(theta, theta_dot, prev_cmd)
                     enhanced_states.append(enhanced_state)
                 else:
                     # Already enhanced
@@ -211,9 +210,12 @@ class ModelAnalyzer:
 
         return actions
 
-    def create_action_heatmap(self, prev_cmd=0.0):
-        """Create heatmap of actions across the state space for a fixed previous command value."""
-        print(f"Creating action heatmap (prev_cmd={prev_cmd})...")
+    def create_action_heatmap(self, action_history=None):
+        """Create heatmap of actions across the state space for a fixed action history."""
+        if action_history is None:
+            action_history = np.zeros(self.action_history_size)
+
+        print(f"Creating action heatmap...")
 
         # Create meshgrid of states
         theta_mesh, theta_dot_mesh = np.meshgrid(self.theta_range, self.theta_dot_range)
@@ -221,7 +223,7 @@ class ModelAnalyzer:
         # Create enhanced states for each grid point
         states = []
         for theta, theta_dot in zip(theta_mesh.flatten(), theta_dot_mesh.flatten()):
-            enhanced_state = self._create_enhanced_state(theta, theta_dot, prev_cmd)
+            enhanced_state = self._create_enhanced_state(theta, theta_dot, action_history)
             states.append(enhanced_state)
 
         states = np.array(states)
@@ -240,7 +242,7 @@ class ModelAnalyzer:
         plt.colorbar(heatmap, label="Action (normalized [-1, 1])")
         plt.xlabel("Angle θ (degrees)")
         plt.ylabel("Angular Velocity θ̇ (rad/s)")
-        plt.title(f"Controller Action Map (prev_cmd={prev_cmd})")
+        plt.title(f"Controller Action Map")
 
         # Add contour lines
         contour = plt.contour(
@@ -258,14 +260,14 @@ class ModelAnalyzer:
         plt.axvline(x=0, color="k", linestyle="--", alpha=0.3)
         plt.grid(alpha=0.3)
         plt.tight_layout()
-        plt.savefig(self.output_dir / f"action_heatmap_prev_cmd_{prev_cmd}.png", dpi=300)
+        plt.savefig(self.output_dir / f"action_heatmap.png", dpi=300)
 
         print("Action heatmap created and saved.")
 
-    def create_action_heatmaps_for_multiple_prev_cmds(self):
-        """Create a square 3×3 grid of action heatmaps for prev_cmd ∈ [−1…1], with improved text layout."""
+    def create_action_heatmaps_for_multiple_action_histories(self):
+        """Create a 3×3 grid of action heatmaps for different action histories."""
         sns.set_style("white")
-        prev_cmd_values = np.linspace(-1.0, 1.0, 9)
+        action_values = np.linspace(-1.0, 1.0, 9)
         rows = cols = 3
         vmin, vmax = -1.0, 1.0
 
@@ -274,14 +276,17 @@ class ModelAnalyzer:
         theta_deg = self.theta_range * 180.0 / np.pi
 
         # Plot each panel
-        for idx, prev_cmd in enumerate(prev_cmd_values):
+        for idx, action_value in enumerate(action_values):
             ax = axes.flat[idx]
             Θ, 𝑤 = np.meshgrid(self.theta_range, self.theta_dot_range)
+
+            # Create action history filled with the current action value
+            action_history = np.ones(self.action_history_size) * action_value
 
             # Create enhanced states
             states = []
             for theta, theta_dot in zip(Θ.flatten(), 𝑤.flatten()):
-                enhanced_state = self._create_enhanced_state(theta, theta_dot, prev_cmd)
+                enhanced_state = self._create_enhanced_state(theta, theta_dot, action_history)
                 states.append(enhanced_state)
 
             states = np.array(states)
@@ -294,7 +299,7 @@ class ModelAnalyzer:
             )
 
             # smaller individual titles, nudged down
-            ax.set_title(f"prev_cmd = {prev_cmd:.2f}", fontsize=8, pad=4)
+            ax.set_title(f"action_history = {action_value:.2f}", fontsize=8, pad=4)
             ax.axhline(0, color="gray", linestyle="--", linewidth=0.7)
             ax.axvline(0, color="gray", linestyle="--", linewidth=0.7)
 
@@ -307,7 +312,7 @@ class ModelAnalyzer:
         cbar.set_label("Action (normalized [-1,1])", fontsize=10)
 
         # Save & close
-        fig.savefig(self.output_dir / "action_heatmaps_multiple_prev_cmds_square.png", dpi=300)
+        fig.savefig(self.output_dir / "action_heatmaps_multiple_action_histories.png", dpi=300)
         plt.close(fig)
 
     def create_phase_space_plot(self):
@@ -320,7 +325,7 @@ class ModelAnalyzer:
         # Create enhanced states for each grid point
         states = []
         for theta, theta_dot in zip(theta_mesh.flatten(), theta_dot_mesh.flatten()):
-            enhanced_state = self._create_enhanced_state(theta, theta_dot, 0.0)
+            enhanced_state = self._create_enhanced_state(theta, theta_dot)
             states.append(enhanced_state)
 
         states = np.array(states)
@@ -658,7 +663,7 @@ class ModelAnalyzer:
 
         # Simulate trajectory for each initial condition
         for theta, theta_dot, label in initial_conditions:
-            state, _ = self.env.reset(state=np.array([theta, theta_dot, 0.0]))  # Reset environment
+            state, _ = self.env.reset(state=np.array([theta, theta_dot]))  # Reset environment
 
             # Initialize trajectory
             trajectory = {"label": label, "states": [state.copy()], "actions": [], "time": [0.0]}
@@ -908,7 +913,7 @@ class ModelAnalyzer:
 
         print("Controller comparison completed and saved.")
 
-    def create_trajectory_heatmap_overlay(self, prev_cmd=0.0, max_steps=200, grid_size=10):
+    def create_trajectory_heatmap_overlay(self, max_steps=200, grid_size=10):
         """Plot action‐heatmap with colored trajectories, arrows, and start/end markers."""
 
         # — 1) Heatmap background
@@ -917,7 +922,7 @@ class ModelAnalyzer:
         # Create enhanced states for heatmap
         states = []
         for theta, theta_dot in zip(theta_mesh.flatten(), theta_dot_mesh.flatten()):
-            enhanced_state = self._create_enhanced_state(theta, theta_dot, prev_cmd)
+            enhanced_state = self._create_enhanced_state(theta, theta_dot)
             states.append(enhanced_state)
 
         states = np.array(states)
@@ -960,15 +965,14 @@ class ModelAnalyzer:
             traj = []
 
             # Initial enhanced state
-            enhanced_state = self._create_enhanced_state(θ0, ω0, prev_cmd)
+            enhanced_state = self._create_enhanced_state(θ0, ω0)
 
             # Initialize history buffers
             theta_history = collections.deque([θ0] * self.theta_history_size, maxlen=self.theta_history_size)
             theta_dot_history = collections.deque([ω0] * self.theta_history_size, maxlen=self.theta_history_size)
-            action_history = collections.deque([prev_cmd] * self.action_history_size, maxlen=self.action_history_size)
             
             # Track current motor command through simulation
-            current_motor_command = prev_cmd
+            current_motor_command = self.env.action_history[-1] if self.env.action_history else 0.0
 
             for _ in range(max_steps):
                 # Get current basic state values
@@ -1002,7 +1006,6 @@ class ModelAnalyzer:
                 # Update history buffers
                 theta_history.append(theta)
                 theta_dot_history.append(theta_dot)
-                action_history.appendleft(current_motor_command)  # Add newest action at front
 
                 # Use the corrected action (new_motor_command) for SimNet, not the delta
                 action_tensor = torch.FloatTensor([[current_motor_command]]).to(self.device)
@@ -1051,10 +1054,10 @@ class ModelAnalyzer:
 
         ax.set_xlabel("Angle θ (deg)")
         ax.set_ylabel("Angular Velocity θ̇ (rad/s)")
-        ax.set_title(f"Action Heatmap (prev_cmd={prev_cmd}) with Trajectories (Enhanced State)")
+        ax.set_title(f"Action Heatmap with Trajectories")
 
         plt.tight_layout()
-        plt.savefig(self.output_dir / f"traj_over_heatmap_prev_cmd_{prev_cmd}.png", dpi=300)
+        plt.savefig(self.output_dir / f"traj_over_heatmap.png", dpi=300)
         plt.close(fig)
         print("Trajectory-overlay heatmap saved.")
 
@@ -1093,7 +1096,7 @@ class ModelAnalyzer:
             traj = []
 
             # Initialize enhanced state with zero action
-            enhanced_state = self._create_enhanced_state(θ0, ω0, 0.0)
+            enhanced_state = self._create_enhanced_state(θ0, ω0)
 
             # Initialize history buffers
             theta_history = collections.deque([θ0] * self.theta_history_size, maxlen=self.theta_history_size)
@@ -1214,12 +1217,13 @@ class ModelAnalyzer:
 
     def run_complete_analysis(self):
         """Run all analysis methods."""
-        self.create_action_heatmaps_for_multiple_prev_cmds()
+        self.create_action_heatmap()
+        self.create_action_heatmaps_for_multiple_action_histories()
         self.create_phase_space_plot()
         self.create_3d_action_surface()
         self.analyze_stability_regions()
         self.analyze_simulated_trajectories()
-        self.create_trajectory_heatmap_overlay(prev_cmd=0.0)
+        self.create_trajectory_heatmap_overlay()
         self.create_natural_trajectory_overlay()
 
         print("\nComplete analysis finished. Results saved to:", self.output_dir)
@@ -1288,9 +1292,10 @@ class ModelAnalyzer:
             <div class="enhanced-state-info">
                 <p>Analysis of the trained DDPG controller using enhanced state representation. Enhanced state includes:</p>
                 <ul>
-                    <li>Basic state: theta, theta_dot, prev_action</li>
-                    <li>Moving averages: theta_ma, theta_dot_ma</li>
+                    <li>Basic state: theta, theta_dot</li>
                     <li>Action history: Last {0} motor commands</li>
+                    <li>Theta history: Last {1} theta values</li>
+                    <li>Theta_dot history: Last {2} theta_dot values</li>
                 </ul>
                 <p>All actions are normalized to [-1, 1] range, with motor delay compensation built into the control policy.</p>
             </div>
@@ -1376,7 +1381,7 @@ def main():
     elif args.analysis == "pd":
         analyzer.generate_comparative_pd_controller()
     elif args.analysis == "trajectory_heatmap_overlay":
-        analyzer.create_trajectory_heatmap_overlay(prev_cmd=0.0)
+        analyzer.create_trajectory_heatmap_overlay()
         analyzer.create_natural_trajectory_overlay()
 
 

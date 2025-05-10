@@ -40,17 +40,19 @@ class SimNetTrainer:
 
         # Get enhanced state parameters from env config
         if hasattr(env, "config") and env.config:
-            self.theta_history_size = env.config["observation"].get("theta_history_size", 5)
+            self.theta_history_size = env.config["observation"].get("theta_history_size", 3)
+            self.theta_dot_history_size = env.config["observation"].get("theta_dot_history_size", 3)
             self.action_history_size = env.config["observation"].get("action_history_size", 4)
-            self.motor_delay_steps = env.config["physics"].get("motor_delay_steps", 10)
+            self.motor_delay_steps = env.config["physics"].get("motor_delay_steps", 2)
         else:
-            self.theta_history_size = 5
+            self.theta_history_size = 3
+            self.theta_dot_history_size = 3
             self.action_history_size = 4
-            self.motor_delay_steps = 10
+            self.motor_delay_steps = 2
 
         # Calculate enhanced state dimension
-        # Basic state (3) + theta/theta_dot moving averages (2) + action history (n)
-        enhanced_state_dim = 3 + 2 + self.action_history_size
+        # Basic state (2) + action history (4) + theta history (3) + theta_dot history (3)
+        enhanced_state_dim = 2 + self.action_history_size + self.theta_history_size + self.theta_dot_history_size
 
         # Initialize SimNet from config with enhanced state dimension
         model_config = self.config["model"]
@@ -77,6 +79,7 @@ class SimNetTrainer:
 
         print(f"Initialized SimNetTrainer with enhanced state (dim={enhanced_state_dim})")
         print(f"- theta_history_size: {self.theta_history_size}")
+        print(f"- theta_dot_history_size: {self.theta_dot_history_size}")
         print(f"- action_history_size: {self.action_history_size}")
         print(f"- motor_delay_steps: {self.motor_delay_steps}")
 
@@ -84,7 +87,7 @@ class SimNetTrainer:
         """Return default configuration if none provided."""
         return {
             "model": {
-                "hidden_dims": [128, 128],
+                "hidden_dims": [64, 64, 64],
                 "learning_rate": 0.001,
                 "dropout_rate": 0.1,
                 "activation": "relu",
@@ -130,26 +133,19 @@ class SimNetTrainer:
             },
         }
 
-    def _calculate_moving_average(self, history: collections.deque) -> float:
-        """Calculate moving average from history."""
-        return np.mean(history)
-
     def _create_enhanced_state(
         self,
         theta: float,
         theta_dot: float,
-        prev_action: float,
         theta_history: collections.deque,
         theta_dot_history: collections.deque,
         action_history: collections.deque,
     ) -> np.ndarray:
         """Create enhanced state representation."""
-        # Calculate moving averages
-        theta_ma = self._calculate_moving_average(theta_history)
-        theta_dot_ma = self._calculate_moving_average(theta_dot_history)
-
         # Create enhanced state
-        return np.concatenate([[theta, theta_dot, prev_action], [theta_ma, theta_dot_ma], np.array(action_history)])
+        return np.concatenate(
+            [[theta, theta_dot], np.array(action_history), np.array(theta_history), np.array(theta_dot_history)]
+        )
 
     def collect_physics_data(self) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
         """
@@ -182,7 +178,7 @@ class SimNetTrainer:
             state, _ = self.env.reset(should_zero_previous_action=True)
 
             # Add initial observation noise
-            state[:3] = state[:3] + np.random.normal(0, observation_noise_std, size=3)
+            state[:2] = state[:2] + np.random.normal(0, observation_noise_std, size=2)
 
             for _ in range(steps_per_episode):
                 s_t = state.copy()
@@ -206,7 +202,7 @@ class SimNetTrainer:
             state, _ = self.env.reset()
 
             # Add initial observation noise
-            state[:3] = state[:3] + np.random.normal(0, observation_noise_std, size=3)
+            state[:2] = state[:2] + np.random.normal(0, observation_noise_std, size=2)
 
             for _ in range(steps_per_episode):
                 s_t = state.copy()
@@ -270,7 +266,9 @@ class SimNetTrainer:
 
             # Initialize history buffers for this episode
             theta_history = collections.deque([0.0] * self.theta_history_size, maxlen=self.theta_history_size)
-            theta_dot_history = collections.deque([0.0] * self.theta_history_size, maxlen=self.theta_history_size)
+            theta_dot_history = collections.deque(
+                [0.0] * self.theta_dot_history_size, maxlen=self.theta_dot_history_size
+            )
             action_history = collections.deque([0.0] * self.action_history_size, maxlen=self.action_history_size)
 
             # Process state transitions within each episode
@@ -290,62 +288,42 @@ class SimNetTrainer:
                 # Calculate the ratio between real time difference and environment timestep
                 dt_factor = time_diff / env_dt
 
-                # Skip if the time difference is too large - ADJUSTED FOR 25Hz
-                # With 25Hz, real data at ~33Hz is much closer to our simulation frequency,
-                # so we can use a tighter threshold
+                # Skip if the time difference is too large
                 if dt_factor > 2.5:
                     continue
-
-                # Get the previous motor command for current state
-                # For the first state in the sequence, we can't know what came before
-                # If i > 0, use the motor command from the previous timestep
-                # Otherwise, use the current motor command (not ideal but better than nothing)
-                if i > 0:
-                    prev_motor_command = float(episode_states[i - 1]["motor_pwm"]) / 127.0  # Normalize to [-1, 1]
-                else:
-                    # For the first state, we don't have a previous command
-                    # We could either skip this state or use the current command as an approximation
-                    prev_motor_command = float(current["motor_pwm"]) / 127.0  # This is a compromise
 
                 # Update history buffers
                 theta = current["theta_global"]
                 theta_dot = current["theta_dot"]
                 theta_history.append(theta)
                 theta_dot_history.append(theta_dot)
-                action_history.append(prev_motor_command)
-
-                # Calculate basic state elements
-                basic_state = np.array([theta, theta_dot, prev_motor_command])
-
-                # Calculate enhanced state
-                enhanced_state = self._create_enhanced_state(
-                    theta, theta_dot, prev_motor_command, theta_history, theta_dot_history, action_history
-                )
 
                 # Current action is the motor command applied at the current timestep
                 action = np.array([current["motor_pwm"]]) / 127.0  # Normalize to [-1, 1]
+                action_history.appendleft(action[0])
 
-                # Next state includes next theta, next theta_dot, and CURRENT motor command
-                # (which becomes the "previous" command for the next timestep)
-                current_motor_command = float(current["motor_pwm"]) / 127.0
+                # Calculate enhanced state
+                enhanced_state = self._create_enhanced_state(
+                    theta, theta_dot, theta_history, theta_dot_history, action_history
+                )
 
-                # Update history for next state
+                # Next state
                 next_theta = next_state["theta_global"]
                 next_theta_dot = next_state["theta_dot"]
                 next_theta_history = collections.deque(list(theta_history), maxlen=self.theta_history_size)
-                next_theta_dot_history = collections.deque(list(theta_dot_history), maxlen=self.theta_history_size)
+                next_theta_dot_history = collections.deque(list(theta_dot_history), maxlen=self.theta_dot_history_size)
                 next_action_history = collections.deque(list(action_history), maxlen=self.action_history_size)
 
                 # Update histories with new values
                 next_theta_history.append(next_theta)
                 next_theta_dot_history.append(next_theta_dot)
-                next_action_history.appendleft(current_motor_command)  # Put current command at front of history
+                # Action history should contain commands from before the current time step
+                next_action_history.appendleft(action[0])  # Add current command
 
                 # Create enhanced next state
                 enhanced_next_state = self._create_enhanced_state(
                     next_theta,
                     next_theta_dot,
-                    current_motor_command,
                     next_theta_history,
                     next_theta_dot_history,
                     next_action_history,
@@ -581,8 +559,9 @@ class SimNetTrainer:
         self.simnet.train()
         total_loss = 0
         total_physics_loss = 0
-        total_cmd_loss = 0
-        total_history_loss = 0
+        total_action_history_loss = 0
+        total_theta_history_loss = 0
+        total_theta_dot_history_loss = 0
         total_weighted_samples = 0
 
         # Pull out arrays for convenience
@@ -628,7 +607,6 @@ class SimNetTrainer:
                 extreme_samples = extreme_samples.bool()
 
                 if is_finetuning:
-                    # weights[extreme_samples] = 5.0  # Increase weight for extreme samples
                     weights[~extreme_samples] = 0.1  # Decrease weight for non-extreme samples
                 else:
                     weights[~extreme_samples] = 1.0
@@ -657,25 +635,37 @@ class SimNetTrainer:
 
             # Track individual component losses for monitoring
             physics_loss = torch.nn.functional.mse_loss(pred_deltas[:, :2], target_deltas[:, :2])
-            cmd_loss = (
-                torch.nn.functional.mse_loss(pred_deltas[:, 2], target_deltas[:, 2]) if pred_deltas.shape[1] > 2 else 0
+
+            # Calculate history losses separately
+            action_history_loss = (
+                torch.nn.functional.mse_loss(pred_deltas[:, 2:6], target_deltas[:, 2:6])
+                if pred_deltas.shape[1] > 5
+                else 0
+            )
+            theta_history_loss = (
+                torch.nn.functional.mse_loss(pred_deltas[:, 6:9], target_deltas[:, 6:9])
+                if pred_deltas.shape[1] > 8
+                else 0
+            )
+            theta_dot_history_loss = (
+                torch.nn.functional.mse_loss(pred_deltas[:, 9:12], target_deltas[:, 9:12])
+                if pred_deltas.shape[1] > 11
+                else 0
             )
 
-            # Average loss for all remaining components if they exist
-            if pred_deltas.shape[1] > 3:
-                history_loss = torch.nn.functional.mse_loss(pred_deltas[:, 3:], target_deltas[:, 3:])
-            else:
-                history_loss = 0
-
             total_physics_loss += physics_loss.item()
-            total_cmd_loss += cmd_loss.item() if not isinstance(cmd_loss, int) else 0
-            total_history_loss += history_loss.item() if not isinstance(history_loss, int) else 0
+            total_action_history_loss += action_history_loss.item() if not isinstance(action_history_loss, int) else 0
+            total_theta_history_loss += theta_history_loss.item() if not isinstance(theta_history_loss, int) else 0
+            total_theta_dot_history_loss += (
+                theta_dot_history_loss.item() if not isinstance(theta_dot_history_loss, int) else 0
+            )
 
         return {
             "train_loss": total_loss / num_batches,
             "physics_loss": total_physics_loss / num_batches,
-            "cmd_loss": total_cmd_loss / num_batches,
-            "history_loss": total_history_loss / num_batches,
+            "action_history_loss": total_action_history_loss / num_batches,
+            "theta_history_loss": total_theta_history_loss / num_batches,
+            "theta_dot_history_loss": total_theta_dot_history_loss / num_batches,
             "extreme_samples_percent": (
                 (total_weighted_samples / (num_batches * batch_size)) * 100 if total_weighted_samples > 0 else 0
             ),
@@ -686,8 +676,9 @@ class SimNetTrainer:
         self.simnet.eval()
         total_loss = 0
         total_physics_loss = 0
-        total_cmd_loss = 0
-        total_history_loss = 0
+        total_action_history_loss = 0
+        total_theta_history_loss = 0
+        total_theta_dot_history_loss = 0
 
         states_arr = val_data["states"]
         actions_arr = val_data["actions"]
@@ -721,27 +712,37 @@ class SimNetTrainer:
 
                 # Track individual component losses for monitoring
                 physics_loss = torch.nn.functional.mse_loss(pred_deltas[:, :2], target_deltas[:, :2])
-                cmd_loss = (
-                    torch.nn.functional.mse_loss(pred_deltas[:, 2], target_deltas[:, 2])
-                    if pred_deltas.shape[1] > 2
+
+                # Calculate history losses separately
+                action_history_loss = (
+                    torch.nn.functional.mse_loss(pred_deltas[:, 2:6], target_deltas[:, 2:6])
+                    if pred_deltas.shape[1] > 5
+                    else 0
+                )
+                theta_history_loss = (
+                    torch.nn.functional.mse_loss(pred_deltas[:, 6:9], target_deltas[:, 6:9])
+                    if pred_deltas.shape[1] > 8
+                    else 0
+                )
+                theta_dot_history_loss = (
+                    torch.nn.functional.mse_loss(pred_deltas[:, 9:12], target_deltas[:, 9:12])
+                    if pred_deltas.shape[1] > 11
                     else 0
                 )
 
-                # Average loss for all remaining components if they exist
-                if pred_deltas.shape[1] > 3:
-                    history_loss = torch.nn.functional.mse_loss(pred_deltas[:, 3:], target_deltas[:, 3:])
-                else:
-                    history_loss = 0
-
                 total_physics_loss += physics_loss.item()
-                total_cmd_loss += cmd_loss.item() if not isinstance(cmd_loss, int) else 0
-                total_history_loss += history_loss.item() if not isinstance(history_loss, int) else 0
+                total_action_history_loss += (
+                    action_history_loss.item() if not isinstance(action_history_loss, int) else 0
+                )
+                total_theta_history_loss += theta_history_loss.item() if not isinstance(theta_history_loss, int) else 0
+                total_theta_dot_history_loss += (
+                    theta_dot_history_loss.item() if not isinstance(theta_dot_history_loss, int) else 0
+                )
 
         return {
             "val_loss": total_loss / num_batches,
             "val_physics_loss": total_physics_loss / num_batches,
-            "val_cmd_loss": total_cmd_loss / num_batches,
-            "val_history_loss": total_history_loss / num_batches,
+            "val_action_history_loss": total_action_history_loss / num_batches,
         }
 
     @staticmethod

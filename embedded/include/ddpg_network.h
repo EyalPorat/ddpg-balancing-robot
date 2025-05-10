@@ -110,9 +110,9 @@ public:
         Serial.printf("Layer %s dimensions decoded: %dx%d (at position %d)\n", 
                     layerName, rows, cols, currentPosition);
 
-        // Sanity check dimensions
-        if (rows != 10 || cols != 9) {
-            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 10x9\n", layerName, rows, cols);
+        // Sanity check dimensions - expecting 10x12 for new state structure
+        if (rows != 10 || cols != 12) {
+            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 10x12\n", layerName, rows, cols);
             file.close();
             return false;
         }
@@ -184,7 +184,7 @@ public:
         free(bias_buffer);
 
         // Read LayerNorm parameters for l1
-        size_t norm_size = rows * sizeof(float);
+        norm_size = rows * sizeof(float);
         
         // Read gamma
         uint8_t* gamma_buffer = (uint8_t*)malloc(norm_size);
@@ -542,6 +542,7 @@ private:
     LayerNormParams l1_norm;
     LayerNormParams l2_norm;
     float max_action;
+    size_t norm_size;
 
     void layerNorm(std::vector<float>& x, const LayerNormParams& params) {
         // Calculate mean

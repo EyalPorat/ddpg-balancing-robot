@@ -43,6 +43,7 @@ class DDPGTrainer:
         model_config = self.config["model"]
         train_config = self.config["training"]
 
+        # State dimension is now 12: theta, theta_dot, action_history[4], theta_history[3], theta_dot_history[3]
         state_dim = env.observation_space.shape[0]
         action_dim = env.action_space.shape[0]
 
@@ -128,7 +129,7 @@ class DDPGTrainer:
         """Return default configuration if none provided."""
         return {
             "model": {
-                "actor": {"hidden_dims": [8, 8], "learning_rate": 1e-4},
+                "actor": {"hidden_dims": [10, 10], "learning_rate": 1e-4},
                 "critic": {"hidden_dims": [256, 256], "learning_rate": 3e-4},
             },
             "training": {
@@ -320,12 +321,12 @@ class DDPGTrainer:
             # We need to monkey-patch the environment's reset method for this episode
             original_reset = self.env.reset
 
-            def curriculum_reset(seed=None, should_zero_previous_action=False):
+            def curriculum_reset(seed=None, state=None):
                 """Override environment reset to use curriculum ranges."""
                 super_reset = original_reset
 
                 # Reset with default parameters
-                state, info = super_reset(seed, should_zero_previous_action)
+                state_returned, info = super_reset(seed, state=state)
 
                 # Override the first two state components (theta and theta_dot)
                 # with values sampled from our curriculum ranges
@@ -337,12 +338,11 @@ class DDPGTrainer:
                     [
                         np.deg2rad(theta_deg),
                         np.deg2rad(theta_dot_dps),
-                        self.env.state[2],  # Keep the previous motor command unchanged
                     ]
                 )
                 self.env.state = basic_state.copy()
 
-                # Get the enhanced state (this will update histories and moving averages)
+                # Get the enhanced state (this will update histories)
                 enhanced_state = self.env._get_enhanced_state()
 
                 return enhanced_state, info
@@ -464,4 +464,4 @@ class DDPGTrainer:
         print("\nCritic Model Summary (Enhanced State):")
         print(self.critic)
         print(f"\nState Dimensions: {self.env.observation_space.shape[0]}")
-        print("State Structure: [theta, theta_dot, prev_action, theta_ma, theta_dot_ma, pwm_history[0:4]]")
+        print("State Structure: [theta, theta_dot, action_history[0:3], theta_history[0:2], theta_dot_history[0:2]]")
