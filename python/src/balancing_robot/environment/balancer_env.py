@@ -338,7 +338,7 @@ class BalancerEnv(gym.Env):
         """Compute reward based on current state."""
         # Reward calculation remains the same
         w = self.reward_weights
-        theta = self.state[0] + np.deg2rad(11.0)  # Offset to center the reward around zero
+        theta = self.state[0] + np.deg2rad(7.5)  # Offset to center the reward around zero
         theta_dot = self.state[1]
 
         # Directional component

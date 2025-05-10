@@ -560,7 +560,7 @@ class ModelAnalyzer:
 
                     # Check if balanced using average of last 10 readings for angular velocity
                     if (
-                        abs(next_state[0] + np.deg2rad(11.0)) < stable_threshold_theta
+                        abs(next_state[0] + np.deg2rad(7.5)) < stable_threshold_theta
                         and abs(np.mean(theta_dot_history)) < stable_threshold_theta_dot
                     ):
                         stability_grid[i, j] = 1
