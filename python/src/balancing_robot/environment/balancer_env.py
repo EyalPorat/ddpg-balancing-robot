@@ -334,6 +334,48 @@ class BalancerEnv(gym.Env):
         # Return the enhanced state
         return self._get_enhanced_state(), reward, terminated, truncated, info
 
+    # def _compute_reward(self, reached_stable: bool) -> float:
+    #     """Compute reward based on current state."""
+    #     # Reward calculation remains the same
+    #     w = self.reward_weights
+    #     theta = self.state[0] + np.deg2rad(7.5)  # Offset to center the reward around zero
+    #     theta_dot = self.state[1]
+
+    #     # Directional component
+    #     direction_component = -np.sign(theta) * theta_dot
+
+    #     # Stillness reward
+    #     stillness_reward = 0
+    #     angle_threshold = np.deg2rad(10)
+    #     if abs(theta) < angle_threshold:
+    #         angle_factor = 1.0 - (abs(theta) / angle_threshold)
+    #         stillness_reward = w["stillness"] * angle_factor
+
+    #         if abs(theta_dot) < np.deg2rad(30):
+    #             velocity_factor = max(0, 1.0 - (abs(theta_dot) / np.deg2rad(40)))
+    #             stillness_reward += velocity_factor**2 * w["stillness"]
+
+    #     termination_penalty = -20 if self._check_termination() else 0
+
+    #     far_from_center_penalty = -abs(theta) * w["far_from_center_penalty"]
+
+    #     angular_vel_far_from_center_penalty = (
+    #         -abs(theta_dot) * w["angular_vel_far_from_center_penalty"]
+    #         if abs(theta) < np.deg2rad(w["max_angle_for_angular_vel_far_from_center_penalty"])
+    #         else 0
+    #     )
+
+    #     reward = (
+    #         w["direction"] * direction_component
+    #         + stillness_reward
+    #         + termination_penalty
+    #         + far_from_center_penalty
+    #         + angular_vel_far_from_center_penalty
+    #     )
+
+    #     return float(reward)
+
+
     def _compute_reward(self, reached_stable: bool) -> float:
         """Compute reward based on current state."""
         # Reward calculation remains the same
@@ -341,36 +383,16 @@ class BalancerEnv(gym.Env):
         theta = self.state[0] + np.deg2rad(7.5)  # Offset to center the reward around zero
         theta_dot = self.state[1]
 
-        # Directional component
-        direction_component = -np.sign(theta) * theta_dot
-
-        # Stillness reward
-        stillness_reward = 0
-        angle_threshold = np.deg2rad(10)
-        if abs(theta) < angle_threshold:
-            angle_factor = 1.0 - (abs(theta) / angle_threshold)
-            stillness_reward = w["stillness"] * angle_factor
-
-            if abs(theta_dot) < np.deg2rad(30):
-                velocity_factor = max(0, 1.0 - (abs(theta_dot) / np.deg2rad(40)))
-                stillness_reward += velocity_factor**2 * w["stillness"]
-
-        termination_penalty = -20 if self._check_termination() else 0
-
-        far_from_center_penalty = -abs(theta) * w["far_from_center_penalty"]
-
-        angular_vel_far_from_center_penalty = (
-            -abs(theta_dot) * w["angular_vel_far_from_center_penalty"]
-            if abs(theta) < np.deg2rad(w["max_angle_for_angular_vel_far_from_center_penalty"])
-            else 0
+        # Low angular velocity bonus
+        low_angular_velocity_bonus = np.exp(
+            -abs(theta_dot) / np.deg2rad(30)
         )
 
+        termination_penalty = -500 if self._check_termination() else 0
+
         reward = (
-            w["direction"] * direction_component
-            + stillness_reward
+            low_angular_velocity_bonus * w["stillness"]
             + termination_penalty
-            + far_from_center_penalty
-            + angular_vel_far_from_center_penalty
         )
 
         return float(reward)
