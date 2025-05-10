@@ -388,10 +388,13 @@ class BalancerEnv(gym.Env):
             -abs(theta_dot) / np.deg2rad(30)
         )
 
+        high_action_penalty = -abs(self.state[2])
+
         termination_penalty = -500 if self._check_termination() else 0
 
         reward = (
             low_angular_velocity_bonus * w["stillness"]
+            + high_action_penalty * 20
             + termination_penalty
         )
 
