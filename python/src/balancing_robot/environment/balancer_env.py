@@ -179,7 +179,7 @@ class BalancerEnv(gym.Env):
         else:
             # Initialize with random angle and angular velocity
             theta_deg = self.np_random.uniform(-50, 50)  # theta in degrees
-            theta_dot_dps = self.np_random.uniform(-150, 150)  # theta_dot in degrees per second
+            theta_dot_dps = self.np_random.uniform(-250, 250)  # theta_dot in degrees per second
             random_motor_command = self.np_random.uniform(-1.0, 1.0)  # Random initial motor command
             prev_motor_command = 0.0 if should_zero_previous_action else random_motor_command
 

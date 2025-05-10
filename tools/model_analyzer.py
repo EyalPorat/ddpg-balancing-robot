@@ -95,8 +95,8 @@ class ModelAnalyzer:
         if "observation" in self.env_config:
             obs_config = self.env_config["observation"]
             termination_config = self.env_config["termination"]
-            angle_limit = termination_config.get("max_angle", np.pi / 4)
-            velocity_limit = obs_config.get("angular_velocity_limit", 8.0)
+            angle_limit = np.deg2rad(60)
+            velocity_limit = 4
 
             self.theta_range = np.linspace(-angle_limit, angle_limit, 100)
             self.theta_dot_range = np.linspace(-velocity_limit, velocity_limit, 100)
@@ -948,8 +948,8 @@ class ModelAnalyzer:
         θ_min, θ_max = theta_deg.min(), theta_deg.max()
         ω_min, ω_max = self.theta_dot_range.min(), self.theta_dot_range.max()
 
-        thetas0 = np.linspace(self.theta_range.min(), self.theta_range.max(), grid_size)
-        ωs0 = np.linspace(self.theta_dot_range.min(), self.theta_dot_range.max(), grid_size)
+        thetas0 = np.linspace(np.deg2rad(-60), np.deg2rad(60), grid_size)
+        ωs0 = np.linspace(-4, 4, grid_size)
         starts = [(θ0, ω0) for θ0 in thetas0 for ω0 in ωs0]
 
         max_delta = getattr(self.env, 'max_delta', 0.25)  # Default to 0.25 if not specified
