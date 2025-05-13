@@ -20,8 +20,8 @@ data_collection:
 training:
   # Physics-based pretraining
   pretrain:
-    learning_rate: 0.00005
-    epochs: 30
+    learning_rate: 0.0001
+    epochs: 1
     batch_size: 512
     early_stopping_patience: 10
     reduce_lr_patience: 4
@@ -30,7 +30,7 @@ training:
 
   # Real-data fine-tuning
   finetune:
-    learning_rate: 0.00001
+    learning_rate: 0.001
     epochs: 50
     batch_size: 128
     early_stopping_patience: 5
@@ -40,7 +40,7 @@ training:
 
   # Class balancing settings
   class_balancing:
-    enabled: true
+    enabled: false
     num_bins: 15
     strategy: "kmeans"     # Options: 'uniform', 'quantile', 'kmeans'
     sample_weights: false     # Use weighted sampling during training
@@ -48,10 +48,10 @@ training:
 
     thresholds:
       angle_deg: 20
-      angular_velocity_dps: 120
+      angular_velocity_dps: 90
 
       max_abs_action: 0.9
-      motor_angle_deg: 10
+      motor_angle_deg: 20
 
 # Hybrid simulation settings
 hybrid:

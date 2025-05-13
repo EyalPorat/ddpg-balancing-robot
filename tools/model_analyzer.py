@@ -77,6 +77,7 @@ class ModelAnalyzer:
         self.simnet = SimNet(state_dim=self.enhanced_state_dim, action_dim=1, hidden_dims=(32, 32, 32))
         self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/simnet_final.pt")["state_dict"])
         # self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/physics/best_simnet.pt")["state_dict"])
+        # self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/real/best_simnet.pt")["state_dict"])
         self.simnet.to(device)
         self.simnet.eval()  # Set to evaluation mode
 

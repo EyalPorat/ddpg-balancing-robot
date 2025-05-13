@@ -2,14 +2,14 @@ import yaml
 import torch
 import numpy as np
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
-from tqdm import tqdm
+from typing import Dict, List, Optional, Tuple, Any
 import collections
+from tqdm import tqdm
 from sklearn.preprocessing import KBinsDiscretizer
 
 from ..models import SimNet
 from ..environment import BalancerEnv
-from .utils import TrainingLogger, save_model
+from ..training.utils import TrainingLogger, save_model
 
 
 class SimNetTrainer:
@@ -88,8 +88,7 @@ class SimNetTrainer:
         return {
             "model": {
                 "hidden_dims": [32, 32, 32],
-                "learning_rate": 0.001,
-                "dropout_rate": 0.1,
+                "dropout_rate": 0.25,
                 "activation": "relu",
                 "layer_norm": True,
             },
@@ -97,32 +96,41 @@ class SimNetTrainer:
                 "physics_samples": 100000,
                 "real_samples": 10000,
                 "noise_std": 0.1,
-                "validation_split": 0.1,
+                "observation_noise_std": 0.01,
+                "validation_split": 0.2,
                 "random_seed": 42,
             },
             "training": {
                 "pretrain": {
-                    "epochs": 50,
+                    "learning_rate": 0.00005,
+                    "epochs": 30,
                     "batch_size": 512,
                     "early_stopping_patience": 10,
-                    "reduce_lr_patience": 5,
+                    "reduce_lr_patience": 4,
                     "reduce_lr_factor": 0.5,
-                    "min_lr": 0.00001,
+                    "min_lr": 0.0000001,
                 },
                 "finetune": {
-                    "epochs": 20,
+                    "learning_rate": 0.00001,
+                    "epochs": 50,
                     "batch_size": 128,
                     "early_stopping_patience": 5,
                     "reduce_lr_patience": 3,
                     "reduce_lr_factor": 0.5,
-                    "min_lr": 0.00001,
+                    "min_lr": 0.0000001,
                 },
                 "class_balancing": {
                     "enabled": False,
-                    "num_bins": 10,
-                    "strategy": "uniform",
+                    "num_bins": 15,
+                    "strategy": "kmeans",
                     "sample_weights": False,
                     "oversample": False,
+                    "thresholds": {
+                        "angle_deg": 20,
+                        "angular_velocity_dps": 120,
+                        "max_abs_action": 0.9,
+                        "motor_angle_deg": 10,
+                    },
                 },
             },
             "hybrid": {
@@ -130,6 +138,12 @@ class SimNetTrainer:
                 "target_ratio": 1.0,
                 "adaptation_steps": 1000,
                 "adaptation_schedule": "linear",
+            },
+            "logging": {
+                "log_frequency": 1,
+                "validation_frequency": 5,
+                "save_best": True,
+                "save_frequency": 10,
             },
         }
 
@@ -251,76 +265,76 @@ class SimNetTrainer:
         return train_data, val_data
 
     def process_real_data(self, log_data: List[Dict[str, Any]]) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
-        """Process real robot log data with."""
+        """Process real robot log data with proper history handling for sequential prediction."""
         states = []
         actions = []
         next_states = []
 
+        # Process each episode
         for episode in log_data:
             episode_states = episode["states"]
 
-            if len(episode_states) < self.action_history_size + 2:
+            # Skip episodes that are too short
+            min_length_needed = max(self.action_history_size, self.theta_history_size, self.theta_dot_history_size) + 2
+            if len(episode_states) < min_length_needed:
                 continue
 
-            # Collect theta_dot values for analysis
-            episode_theta_dots = [s["theta_dot"] for s in episode_states]
-
             # Initialize history buffers
-            initial_theta = episode_states[0]["theta_global"]
-            initial_theta_dot = episode_states[0]["theta_dot"]
-            initial_action = episode_states[0]["motor_pwm"] / 127.0
-
-            theta_history = collections.deque([initial_theta] * self.theta_history_size, maxlen=self.theta_history_size)
+            action_history = collections.deque([0.0] * self.action_history_size, maxlen=self.action_history_size)
+            theta_history = collections.deque([0.0] * self.theta_history_size, maxlen=self.theta_history_size)
             theta_dot_history = collections.deque(
-                [initial_theta_dot] * self.theta_dot_history_size, maxlen=self.theta_dot_history_size
-            )
-            action_history = collections.deque(
-                [initial_action] * self.action_history_size, maxlen=self.action_history_size
+                [0.0] * self.theta_dot_history_size, maxlen=self.theta_dot_history_size
             )
 
+            # Pre-fill history buffers with initial values
+            for i in range(min_length_needed - 2):
+                idx = min(i, len(episode_states) - 1)  # Avoid index out of bounds
+                action = episode_states[idx]["motor_pwm"] / 127.0  # Normalize to [-1, 1]
+                theta = episode_states[idx]["theta_global"]
+                theta_dot = episode_states[idx]["theta_dot"]
+
+                action_history.append(action)
+                theta_history.append(theta)
+                theta_dot_history.append(theta_dot)
+
+            # Process state transitions
             for i in range(len(episode_states) - 1):
                 current = episode_states[i]
-                next_state = episode_states[i + 1]
+                next_state_data = episode_states[i + 1]
 
+                # Extract current values
                 theta = current["theta_global"]
                 theta_dot = current["theta_dot"]
-                action = np.array([current["motor_pwm"]]) / 127.0
+                action_value = current["motor_pwm"] / 127.0  # Normalize to [-1, 1]
+                action = np.array([action_value])
 
+                # Get next state values
+                next_theta = next_state_data["theta_global"]
+                next_theta_dot = next_state_data["theta_dot"]
+
+                # Create enhanced states using SAME history buffers for both
                 enhanced_state = self._create_enhanced_state(
                     theta, theta_dot, theta_history, theta_dot_history, action_history
                 )
 
-                next_theta = next_state["theta_global"]
-                next_theta_dot = next_state["theta_dot"]
-
-                # Create next state histories
-                next_theta_history = collections.deque(list(theta_history), maxlen=self.theta_history_size)
-                next_theta_history.appendleft(theta)
-
-                next_theta_dot_history = collections.deque(list(theta_dot_history), maxlen=self.theta_dot_history_size)
-                next_theta_dot_history.appendleft(theta_dot)
-
-                next_action_history = collections.deque(list(action_history), maxlen=self.action_history_size)
-                next_action_history.appendleft(action[0])
-
                 enhanced_next_state = self._create_enhanced_state(
-                    next_theta,
-                    next_theta_dot,
-                    next_theta_history,
-                    next_theta_dot_history,
-                    next_action_history,
+                    next_theta, next_theta_dot, theta_history, theta_dot_history, action_history
                 )
 
+                # Store the transition
                 states.append(enhanced_state)
                 actions.append(action)
                 next_states.append(enhanced_next_state)
 
-                # Update histories for next iteration
-                theta_history.appendleft(theta)
-                theta_dot_history.appendleft(theta_dot)
-                action_history.appendleft(action[0])
+                # ONLY NOW update history buffers for the next iteration
+                action_history.append(action_value)
+                theta_history.append(theta)
+                theta_dot_history.append(theta_dot)
 
         # Convert to arrays
+        if not states:  # Check if we have any data
+            raise ValueError("No valid sequences found in log data")
+
         states = np.array(states)
         actions = np.array(actions)
         next_states = np.array(next_states)
@@ -447,15 +461,7 @@ class SimNetTrainer:
     def clean_data_exceptions(
         data: Dict[str, np.ndarray], std_threshold_multiplier: float = 3
     ) -> Dict[str, np.ndarray]:
-        """Remove large standard deviation samples from data.
-
-        Args:
-            data: Dictionary containing training data
-            std_threshold_multiplier: Multiplier for standard deviation threshold
-
-        Returns:
-            Dictionary containing cleaned training data
-        """
+        """Remove large standard deviation samples from data."""
         states = data["states"]
         actions = data["actions"]
         next_states = data["next_states"]
@@ -484,16 +490,7 @@ class SimNetTrainer:
 
     @staticmethod
     def prepare_weighted_batch_indices(data_size: int, batch_size: int, weights: np.ndarray) -> List[np.ndarray]:
-        """Prepare batch indices with weighted sampling.
-
-        Args:
-            data_size: Size of the dataset
-            batch_size: Size of each batch
-            weights: Sample weights for weighting the distribution
-
-        Returns:
-            List of batches with indices
-        """
+        """Prepare batch indices with weighted sampling."""
         # Normalize weights for sampling
         weights = weights / np.sum(weights)
 
@@ -546,45 +543,46 @@ class SimNetTrainer:
             # Predict deltas directly
             pred_deltas = self.simnet.predict_delta(states, actions)
 
-            # Calculate sample weights based on thresholds
             # Create weight tensor, default weight = 1.0
             weights = torch.ones(states.shape[0], device=self.device)
 
-            # Convert angles from radians to degrees (for thresholds specified in degrees)
-            angles_degrees = torch.abs(states[:, 0] * 180.0 / np.pi)
-            angular_vels = torch.abs(states[:, 1])
+            # Calculate sample weights based on thresholds if in fine-tuning mode
+            if class_balancing_thresholds is not None and is_finetuning:
+                # Convert angles from radians to degrees (for thresholds specified in degrees)
+                angles_degrees = torch.abs(states[:, 0] * 180.0 / np.pi) + 9
+                angular_vels_degrees = torch.abs(states[:, 1] * 180.0 / np.pi)
 
-            if class_balancing_thresholds is not None:
+                # Safely get action values - avoid squeeze() which can cause dimension issues
+                action_values = torch.abs(actions[:, 0])  # Explicitly get first dimension
+
                 # Apply higher weights for samples where angle or angular velocity exceeds thresholds
                 extreme_samples = (
                     (angles_degrees > class_balancing_thresholds["angle_deg"])
-                    | (angular_vels > class_balancing_thresholds["angular_velocity_dps"])
+                    | (angular_vels_degrees > class_balancing_thresholds["angular_velocity_dps"])
                     | (
                         (angles_degrees > class_balancing_thresholds["motor_angle_deg"])
-                        & (torch.abs(actions).squeeze() < class_balancing_thresholds["max_abs_action"])
+                        & (action_values < class_balancing_thresholds["max_abs_action"])
                     )
                 )
 
-                # Ensure extreme_samples is a boolean tensor of the same size as weights
-                extreme_samples = extreme_samples.bool()
+                non_extreme_weight = 0.1
 
-                if is_finetuning:
-                    weights[~extreme_samples] = 0.1  # Decrease weight for non-extreme samples
-                else:
-                    weights[~extreme_samples] = 1.0
+                # Apply weighting
+                weights[~extreme_samples] = non_extreme_weight
 
                 # Count weighted samples for logging
                 total_weighted_samples += extreme_samples.sum().item()
 
             # Create component weights - prioritize physics components
             component_weights = torch.ones_like(pred_deltas)
-            component_weights[:, 2:] = 0.5  # Lower weight for non-physics components
+            # component_weights[:, 2:] = 0.5  # Lower weight for non-physics components
 
             # Compute weighted MSE loss on all delta components
             squared_errors = (pred_deltas - target_deltas) ** 2
 
             # Apply both sample weights and component weights
-            sample_weights = weights.unsqueeze(1)  # Reshape for broadcasting
+            # Explicitly reshape weights for broadcasting with 2D error tensors
+            sample_weights = weights.view(-1, 1)  # [batch_size, 1]
             weighted_errors = sample_weights * component_weights * squared_errors
 
             loss = weighted_errors.mean()
@@ -598,29 +596,29 @@ class SimNetTrainer:
             # Track individual component losses for monitoring
             physics_loss = torch.nn.functional.mse_loss(pred_deltas[:, :2], target_deltas[:, :2])
 
-            # Calculate history losses separately
-            action_history_loss = (
-                torch.nn.functional.mse_loss(pred_deltas[:, 2:6], target_deltas[:, 2:6])
-                if pred_deltas.shape[1] > 5
-                else 0
+            # Calculate history losses separately with explicit indexing
+            idx_start = 2
+            idx_end = idx_start + self.action_history_size
+            action_history_loss = torch.nn.functional.mse_loss(
+                pred_deltas[:, idx_start:idx_end], target_deltas[:, idx_start:idx_end]
             )
-            theta_history_loss = (
-                torch.nn.functional.mse_loss(pred_deltas[:, 6:9], target_deltas[:, 6:9])
-                if pred_deltas.shape[1] > 8
-                else 0
+
+            idx_start = 2 + self.action_history_size
+            idx_end = idx_start + self.theta_history_size
+            theta_history_loss = torch.nn.functional.mse_loss(
+                pred_deltas[:, idx_start:idx_end], target_deltas[:, idx_start:idx_end]
             )
-            theta_dot_history_loss = (
-                torch.nn.functional.mse_loss(pred_deltas[:, 9:12], target_deltas[:, 9:12])
-                if pred_deltas.shape[1] > 11
-                else 0
+
+            idx_start = 2 + self.action_history_size + self.theta_history_size
+            idx_end = idx_start + self.theta_dot_history_size
+            theta_dot_history_loss = torch.nn.functional.mse_loss(
+                pred_deltas[:, idx_start:idx_end], target_deltas[:, idx_start:idx_end]
             )
 
             total_physics_loss += physics_loss.item()
-            total_action_history_loss += action_history_loss.item() if not isinstance(action_history_loss, int) else 0
-            total_theta_history_loss += theta_history_loss.item() if not isinstance(theta_history_loss, int) else 0
-            total_theta_dot_history_loss += (
-                theta_dot_history_loss.item() if not isinstance(theta_dot_history_loss, int) else 0
-            )
+            total_action_history_loss += action_history_loss.item()
+            total_theta_history_loss += theta_history_loss.item()
+            total_theta_dot_history_loss += theta_dot_history_loss.item()
 
         return {
             "train_loss": total_loss / num_batches,
@@ -679,48 +677,43 @@ class SimNetTrainer:
                 action_history_loss = (
                     torch.nn.functional.mse_loss(pred_deltas[:, 2:6], target_deltas[:, 2:6])
                     if pred_deltas.shape[1] > 5
-                    else 0
+                    else 0.0
                 )
                 theta_history_loss = (
                     torch.nn.functional.mse_loss(pred_deltas[:, 6:9], target_deltas[:, 6:9])
                     if pred_deltas.shape[1] > 8
-                    else 0
+                    else 0.0
                 )
                 theta_dot_history_loss = (
                     torch.nn.functional.mse_loss(pred_deltas[:, 9:12], target_deltas[:, 9:12])
                     if pred_deltas.shape[1] > 11
-                    else 0
+                    else 0.0
                 )
 
                 total_physics_loss += physics_loss.item()
                 total_action_history_loss += (
-                    action_history_loss.item() if not isinstance(action_history_loss, int) else 0
+                    action_history_loss.item() if not isinstance(action_history_loss, float) else 0.0
                 )
-                total_theta_history_loss += theta_history_loss.item() if not isinstance(theta_history_loss, int) else 0
+                total_theta_history_loss += (
+                    theta_history_loss.item() if not isinstance(theta_history_loss, float) else 0.0
+                )
                 total_theta_dot_history_loss += (
-                    theta_dot_history_loss.item() if not isinstance(theta_dot_history_loss, int) else 0
+                    theta_dot_history_loss.item() if not isinstance(theta_dot_history_loss, float) else 0.0
                 )
 
         return {
             "val_loss": total_loss / num_batches,
             "val_physics_loss": total_physics_loss / num_batches,
             "val_action_history_loss": total_action_history_loss / num_batches,
+            "val_theta_history_loss": total_theta_history_loss / num_batches,
+            "val_theta_dot_history_loss": total_theta_dot_history_loss / num_batches,
         }
 
     @staticmethod
     def analyze_class_distribution(
         data: Dict[str, np.ndarray], num_bins: int = 10, strategy: str = "uniform"
     ) -> Dict[str, Any]:
-        """Analyze and visualize the class distribution in data.
-
-        Args:
-            data: Dictionary containing training data
-            num_bins: Number of bins for discretizing the state space
-            strategy: Binning strategy ('uniform', 'quantile', or 'kmeans')
-
-        Returns:
-            Dictionary with distribution statistics
-        """
+        """Analyze and visualize the class distribution in data."""
         states = data["states"]
 
         # Calculate statistics
