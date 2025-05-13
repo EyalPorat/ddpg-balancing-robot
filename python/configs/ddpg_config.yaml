@@ -33,8 +33,8 @@ training:
   save_frequency: 100
 
   # Curriculum learning settings
-  use_curriculum: false
-  curriculum_epochs: 200
+  use_curriculum: true
+  curriculum_epochs: 750
   curriculum_initial_angle_range_precent: 0.1
   curriculum_initial_angular_velocity_range_precent: 0.1
 

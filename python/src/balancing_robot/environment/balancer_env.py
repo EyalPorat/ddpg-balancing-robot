@@ -376,7 +376,7 @@ class BalancerEnv(gym.Env):
         """Compute reward based on current state."""
         # Reward calculation remains the same
         w = self.reward_weights
-        theta = self.state[0] + np.deg2rad(7.5)  # Offset to center the reward around zero
+        theta = self.state[0] + np.deg2rad(9)  # Offset to center the reward around zero
         theta_dot = self.state[1]
 
         # Low angular velocity bonus
@@ -384,9 +384,9 @@ class BalancerEnv(gym.Env):
 
         high_action_penalty = -abs(self.action_history[0])
 
-        termination_penalty = -500 if self._check_termination() else 0
+        termination_penalty = -200 if self._check_termination() else 0
 
-        reward = low_angular_velocity_bonus * w["stillness"] + high_action_penalty * 20 + termination_penalty
+        reward = low_angular_velocity_bonus * w["stillness"] + high_action_penalty * 5 + termination_penalty
 
         return float(reward)
 
