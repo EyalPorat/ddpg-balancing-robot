@@ -99,11 +99,11 @@ unsigned long lastDisplayUpdate = 0;
 unsigned long lastLoggingUpdate = 0;
 
 // Control parameters
-float Kang = 37.0;
+float Kang = 18.0;
 float Komg = 0.84;
-float KIang = 800.0;
-float Kdst = 85.0;
-float Kspd = 2.7;
+float KIang = 600.0;
+float Kdst = 65.0;
+float Kspd = 1.3;
 int16_t maxPwr;
 int16_t fbBalance = 0;
 int16_t motorDeadband = 0;
@@ -236,7 +236,7 @@ void drive() {
 
         // // Create a random action for data collection
         // // float random_factor = random(600, 300) / 1000.0f;
-        // float random_factor = -0.4f;
+        // float random_factor = 0.7f;
         // // action = random_factor * varAngDDPG * (0.6f * maxPwr) - (1.0f * maxPwr);
         // action = random_factor * maxPwr * (varAngDDPG / abs(varAngDDPG));
         // action = constrain(action, -maxPwr, maxPwr);
@@ -247,9 +247,10 @@ void drive() {
         // For logging and display
         powerL = powerR = action;
     } else {
-        varSpd += power * clk;
-        varDst += Kdst * (varSpd * clk - moveTarget);
-        varIang += KIang * varAng * clk;
+        float lowerFactor = 1.0f/4.0f;
+        varSpd += power * clk * lowerFactor;
+        varDst += Kdst * (varSpd * clk * lowerFactor - moveTarget);
+        varIang += KIang * varAng * clk * lowerFactor;
         
         power = varIang + varDst + (Kspd * varSpd) + (Kang * varAng) + (Komg * varOmg);
 
@@ -301,6 +302,8 @@ void resetMotor() {
     motorLdir = motorRdir = 0;
     
     initMotorCommandBuffer();
+
+    ddpgController.resetHistories();
 }
 
 void gyroCalibration() {
@@ -469,16 +472,17 @@ void loop() {
     } else {
         drive();
     }
+    periodicLoggingUpdate();
     
     if (currentTime - lastDisplayUpdate >= DISPLAY_UPDATE_PERIOD) {
         periodicDisplayUpdate();
         lastDisplayUpdate = currentTime;
     }
     
-    if (currentTime - lastLoggingUpdate >= LOGGING_PERIOD) {
-        periodicLoggingUpdate();
-        lastLoggingUpdate = currentTime;
-    }
+    // if (currentTime - lastLoggingUpdate >= LOGGING_PERIOD) {
+    //     periodicLoggingUpdate();
+    //     lastLoggingUpdate = currentTime;
+    // }
 
     do time1 = millis();
     while (time1 - time0 < interval);

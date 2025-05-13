@@ -185,6 +185,19 @@ public:
         return new_command;
     }
 
+    void resetHistories() {
+        for (int i = 0; i < ACTION_HISTORY_SIZE; i++) {
+            action_history[i] = 0.0f;
+        }
+        for (int i = 0; i < THETA_HISTORY_SIZE; i++) {
+            theta_history[i] = 0.0f;
+        }
+        for (int i = 0; i < THETA_DOT_HISTORY_SIZE; i++) {
+            theta_dot_history[i] = 0.0f;
+        }
+        current_motor_command = 0.0f;
+    }
+
     bool isInitialized() const { return initialized; }
     bool isReceivingWeights() const { return receiver ? receiver->isReceiving() : false; }
     float getReceiveProgress() const { return receiver ? receiver->getProgress() : 0.0f; }
