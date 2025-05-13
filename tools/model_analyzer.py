@@ -74,8 +74,9 @@ class ModelAnalyzer:
         self.actor = self._load_model()
 
         # Initialize and load SimNet with enhanced state
-        self.simnet = SimNet(state_dim=self.enhanced_state_dim, action_dim=1, hidden_dims=(64, 64, 64))
+        self.simnet = SimNet(state_dim=self.enhanced_state_dim, action_dim=1, hidden_dims=(32, 32, 32))
         self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/simnet_final.pt")["state_dict"])
+        # self.simnet.load_state_dict(torch.load("python/notebooks/logs/simnet_training/physics/best_simnet.pt")["state_dict"])
         self.simnet.to(device)
         self.simnet.eval()  # Set to evaluation mode
 
@@ -465,7 +466,7 @@ class ModelAnalyzer:
             (
                 theta_mesh.flatten(),
                 theta_dot_mesh.flatten(),
-                np.zeros(theta_mesh.size),  # Initialize prev_action to zero
+                # np.zeros(theta_mesh.size),  # Initialize prev_action to zero
             )
         )
 

@@ -87,7 +87,7 @@ class SimNetTrainer:
         """Return default configuration if none provided."""
         return {
             "model": {
-                "hidden_dims": [64, 64, 64],
+                "hidden_dims": [32, 32, 32],
                 "learning_rate": 0.001,
                 "dropout_rate": 0.1,
                 "activation": "relu",
@@ -251,76 +251,58 @@ class SimNetTrainer:
         return train_data, val_data
 
     def process_real_data(self, log_data: List[Dict[str, Any]]) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
-        """Process real robot log data for training with enhanced state representation."""
+        """Process real robot log data with."""
         states = []
         actions = []
         next_states = []
-        dt_factors = []  # To store the time difference ratio
 
-        # Environment timestep (target)
-        env_dt = 0.04  # 25Hz - the timestep used in simulation and control
-
-        # For each episode in the log_data
         for episode in log_data:
             episode_states = episode["states"]
 
-            # Initialize history buffers for this episode
-            theta_history = collections.deque([0.0] * self.theta_history_size, maxlen=self.theta_history_size)
-            theta_dot_history = collections.deque(
-                [0.0] * self.theta_dot_history_size, maxlen=self.theta_dot_history_size
-            )
-            action_history = collections.deque([0.0] * self.action_history_size, maxlen=self.action_history_size)
+            if len(episode_states) < self.action_history_size + 2:
+                continue
 
-            # Process state transitions within each episode
+            # Collect theta_dot values for analysis
+            episode_theta_dots = [s["theta_dot"] for s in episode_states]
+
+            # Initialize history buffers
+            initial_theta = episode_states[0]["theta_global"]
+            initial_theta_dot = episode_states[0]["theta_dot"]
+            initial_action = episode_states[0]["motor_pwm"] / 127.0
+
+            theta_history = collections.deque([initial_theta] * self.theta_history_size, maxlen=self.theta_history_size)
+            theta_dot_history = collections.deque(
+                [initial_theta_dot] * self.theta_dot_history_size, maxlen=self.theta_dot_history_size
+            )
+            action_history = collections.deque(
+                [initial_action] * self.action_history_size, maxlen=self.action_history_size
+            )
+
             for i in range(len(episode_states) - 1):
-                # Extract current state
                 current = episode_states[i]
-                # Extract next state
                 next_state = episode_states[i + 1]
 
-                # Calculate the real time difference between states
-                time_diff = (next_state["timestamp"] - current["timestamp"]) / 1000.0  # Convert ms to seconds
-
-                # Skip invalid time differences
-                if time_diff <= 0:
-                    continue
-
-                # Calculate the ratio between real time difference and environment timestep
-                dt_factor = time_diff / env_dt
-
-                # Skip if the time difference is too large
-                if dt_factor > 2.5:
-                    continue
-
-                # Update history buffers
                 theta = current["theta_global"]
                 theta_dot = current["theta_dot"]
-                theta_history.append(theta)
-                theta_dot_history.append(theta_dot)
+                action = np.array([current["motor_pwm"]]) / 127.0
 
-                # Current action is the motor command applied at the current timestep
-                action = np.array([current["motor_pwm"]]) / 127.0  # Normalize to [-1, 1]
-                action_history.appendleft(action[0])
-
-                # Calculate enhanced state
                 enhanced_state = self._create_enhanced_state(
                     theta, theta_dot, theta_history, theta_dot_history, action_history
                 )
 
-                # Next state
                 next_theta = next_state["theta_global"]
                 next_theta_dot = next_state["theta_dot"]
+
+                # Create next state histories
                 next_theta_history = collections.deque(list(theta_history), maxlen=self.theta_history_size)
+                next_theta_history.appendleft(theta)
+
                 next_theta_dot_history = collections.deque(list(theta_dot_history), maxlen=self.theta_dot_history_size)
+                next_theta_dot_history.appendleft(theta_dot)
+
                 next_action_history = collections.deque(list(action_history), maxlen=self.action_history_size)
+                next_action_history.appendleft(action[0])
 
-                # Update histories with new values
-                next_theta_history.append(next_theta)
-                next_theta_dot_history.append(next_theta_dot)
-                # Action history should contain commands from before the current time step
-                next_action_history.appendleft(action[0])  # Add current command
-
-                # Create enhanced next state
                 enhanced_next_state = self._create_enhanced_state(
                     next_theta,
                     next_theta_dot,
@@ -332,38 +314,18 @@ class SimNetTrainer:
                 states.append(enhanced_state)
                 actions.append(action)
                 next_states.append(enhanced_next_state)
-                dt_factors.append(dt_factor)
+
+                # Update histories for next iteration
+                theta_history.appendleft(theta)
+                theta_dot_history.appendleft(theta_dot)
+                action_history.appendleft(action[0])
 
         # Convert to arrays
         states = np.array(states)
         actions = np.array(actions)
         next_states = np.array(next_states)
-        dt_factors = np.array(dt_factors)
 
-        # Adjust next_states based on dt_factors
-        if len(states) > 0:
-            # Calculate expected state change per environment timestep
-            state_changes = next_states - states
-
-            # Scale down the state changes by the dt_factor to get consistent rate of change
-            # Only adjust the physical state components (theta, theta_dot), not the enhanced state
-            adjusted_next_states = np.copy(states)
-            adjusted_next_states[:, :2] += state_changes[:, :2] / dt_factors[:, np.newaxis]
-
-            # Keep the other enhanced state elements as they are
-            adjusted_next_states[:, 2:] = next_states[:, 2:]
-
-            # Log statistics about time differences
-            print(f"Time difference statistics:")
-            print(
-                f"  Average real dt: {np.mean(dt_factors * env_dt):.4f}s ({1.0/(np.mean(dt_factors * env_dt)):.1f}Hz)"
-            )
-            print(f"  Min dt factor: {np.min(dt_factors):.2f}, Max dt factor: {np.max(dt_factors):.2f}")
-            print(f"  25Hz simulation timestep: {env_dt:.4f}s")
-            print(f"  Adjustment applied to {len(states)} state transitions")
-
-            # Update next_states with adjusted values
-            next_states = adjusted_next_states
+        print(f"Processed {len(states)} state transitions from real data")
 
         # Split into train/validation
         val_split = self.config["data_collection"]["validation_split"]
