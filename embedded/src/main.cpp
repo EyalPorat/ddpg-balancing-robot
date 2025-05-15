@@ -185,12 +185,12 @@ void driveMotor(byte ch, int8_t sp) {
 
 void driveMotorL(int16_t pwm) {
     outputL = (int8_t)constrain(pwm, -127, 127);
-    driveMotor(0, outputL);
+    driveMotor(0, -outputL);
 }
 
 void driveMotorR(int16_t pwm) {
     outputR = (int8_t)constrain(-pwm, -127, 127);
-    driveMotor(1, outputR);
+    driveMotor(1, -outputR);
 }
 
 void motorPowerWithPunch(int16_t power, int16_t& dir, int16_t& count, void (*driveFunc)(int16_t)) {
