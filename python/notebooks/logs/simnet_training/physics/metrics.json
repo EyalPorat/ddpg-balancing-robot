@@ -1,18 +1,18 @@
 [
   {
-    "train_loss": 0.6379890506980063,
-    "physics_loss": 0.7021069962745425,
-    "action_history_loss": 0.7640406908660099,
-    "theta_history_loss": 0.34901582054023084,
-    "theta_dot_history_loss": 0.7161481283862016,
+    "train_loss": 0.6385628486718606,
+    "physics_loss": 0.700088613282103,
+    "action_history_loss": 0.7657459061080163,
+    "theta_history_loss": 0.3475972573964968,
+    "theta_dot_history_loss": 0.7189338551065244,
     "extreme_samples_percent": 0,
-    "val_loss": 0.11629328462812635,
-    "val_physics_loss": 0.11134598369675654,
-    "val_action_history_loss": 0.41566281738104643,
-    "val_theta_history_loss": 0.029140023583615268,
-    "val_theta_dot_history_loss": 0.19852784524361292,
+    "val_loss": 0.1171076720870963,
+    "val_physics_loss": 0.11330544292379957,
+    "val_action_history_loss": 0.4177857087839634,
+    "val_theta_history_loss": 0.028738937793521706,
+    "val_theta_dot_history_loss": 0.20000089828027498,
     "epoch": 0,
     "lr": 8e-05,
-    "timestamp": "2025-05-15T16:51:30.672964"
+    "timestamp": "2025-05-15T17:30:49.148973"
   }
 ]
