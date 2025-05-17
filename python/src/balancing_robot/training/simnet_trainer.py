@@ -565,7 +565,7 @@ class SimNetTrainer:
                     )
                 )
 
-                non_extreme_weight = 0.1
+                non_extreme_weight = 0.05
 
                 # Apply weighting
                 weights[~extreme_samples] = non_extreme_weight
