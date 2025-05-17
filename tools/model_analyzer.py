@@ -527,7 +527,7 @@ class ModelAnalyzer:
         print("Analyzing stability regions...")
 
         # Define a grid of initial conditions
-        thetas = np.linspace(-np.pi / 2, np.pi / 2, 20)
+        thetas = np.linspace(np.deg2rad(-50), np.deg2rad(50), 20)
         theta_dots = np.linspace(-4, 4, 20)
 
         # Initialize grid for stability tracking (True if state converges to balance)
