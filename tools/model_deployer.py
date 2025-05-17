@@ -38,7 +38,7 @@ class ModelDeployer:
             weights = first_layer.weight.data.cpu().numpy()
             bias = first_layer.bias.data.cpu().numpy()
 
-            # Write L1 shape - now 10x12 for new state structure
+            # Write L1 shape - 12x12
             f.write(struct.pack("II", weights.shape[0], weights.shape[1]))
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
@@ -54,7 +54,7 @@ class ModelDeployer:
             bias = second_layer.bias.data.cpu().numpy()
 
             # Write L2 shape
-            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 10x10 for the second layer
+            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 12x12 for the second layer
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
@@ -68,11 +68,11 @@ class ModelDeployer:
             bias = network.output_layer.bias.data.cpu().numpy()
 
             # Write output layer shape
-            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 1x10 for output layer
+            f.write(struct.pack("II", weights.shape[0], weights.shape[1]))  # 1x12 for output layer
             f.write(weights.astype("float32").tobytes())
             f.write(bias.astype("float32").tobytes())
 
-            logger.info(f"Weight file created with structure: L1(10x12) -> L2(10x10) -> L3(1x10)")
+            logger.info(f"Weight file created with structure: L1(12x12) -> L2(12x12) -> L3(1x12)")
 
     def verify_weights_file(self, filename: str) -> bool:
         """Verify exported weights file structure."""
@@ -82,11 +82,11 @@ class ModelDeployer:
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L1 shape: {rows}x{cols}")
 
-                # We expect 10x12 for the new state structure
+                # We expect 12x12
                 if cols != 12:
-                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x12 (new enhanced state)")
-                if rows != 10:
-                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 10x12")
+                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 12x12 (new enhanced state)")
+                if rows != 12:
+                    raise ValueError(f"Invalid L1 shape: {rows}x{cols}, expected 12x12")
 
                 # Skip weights and biases
                 f.seek(rows * cols * 4 + rows * 4, 1)  # float32 = 4 bytes
@@ -97,9 +97,9 @@ class ModelDeployer:
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L2 shape: {rows}x{cols}")
 
-                # Second layer should be 10x10
-                if rows != 10 or cols != 10:
-                    raise ValueError(f"Invalid L2 shape: {rows}x{cols}, expected 10x10")
+                # Second layer should be 12x12
+                if rows != 12 or cols != 12:
+                    raise ValueError(f"Invalid L2 shape: {rows}x{cols}, expected 12x12")
 
                 # Skip weights and biases
                 f.seek(rows * cols * 4 + rows * 4, 1)  # float32 = 4 bytes
@@ -110,11 +110,11 @@ class ModelDeployer:
                 rows, cols = struct.unpack("II", f.read(8))
                 logger.info(f"L3 shape: {rows}x{cols}")
 
-                # Output layer should be 1x10
+                # Output layer should be 1x12
                 if rows != 1:
-                    raise ValueError(f"Invalid L3 shape: {rows}x{cols}, expected 1x10")
-                if cols != 10:
-                    raise ValueError(f"Invalid L3 shape: {rows}x{cols}, expected 1x10")
+                    raise ValueError(f"Invalid L3 shape: {rows}x{cols}, expected 1x12")
+                if cols != 12:
+                    raise ValueError(f"Invalid L3 shape: {rows}x{cols}, expected 1x12")
 
                 return True
 
@@ -191,7 +191,7 @@ def main():
     # We always use max_action=1.0 for the actor, as actions are normalized to [-1, 1]
     # The scaling to actual PWM values happens in the embedded controller
     logger.info(f"Creating model with state_dim={state_dim}, action_dim=1, max_action=1.0")
-    actor = Actor(state_dim=state_dim, action_dim=1, max_action=1.0, hidden_dims=(10, 10))
+    actor = Actor(state_dim=state_dim, action_dim=1, max_action=1.0, hidden_dims=(12, 12))
 
     # Load saved weights
     checkpoint = torch.load(args.model, map_location=torch.device("cpu"))
@@ -244,9 +244,9 @@ def main():
         # Print verification details for enhanced state structure
         logger.info(f"Weight file verified with expected input dimension: {state_dim}")
         logger.info("Layer dimensions:")
-        logger.info(f"  L1: 10×{state_dim} (First hidden layer × enhanced state)")
-        logger.info("  L2: 10×10 (Second hidden layer)")
-        logger.info("  L3: 1×10 (Output layer)")
+        logger.info(f"  L1: 12×{state_dim} (First hidden layer × enhanced state)")
+        logger.info("  L2: 12×12 (Second hidden layer)")
+        logger.info("  L3: 1×12 (Output layer)")
 
         if deployer.send_weights(temp_file):
             logger.info("Model deployed successfully")

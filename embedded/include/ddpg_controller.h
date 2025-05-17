@@ -62,7 +62,7 @@ public:
             Serial.println("Creating actor...");
             if (!actor) {
                 // Enhanced state: (theta, theta_dot, action_history[0..3], theta_history[0..2], theta_dot_history[0..2])
-                actor = new DDPGActor(ENHANCED_STATE_SIZE, 10, 1, 1.0f);
+                actor = new DDPGActor(ENHANCED_STATE_SIZE, 12, 1, 1.0f);
                 if (!actor) {
                     Serial.println("Failed to create actor");
                     return false;

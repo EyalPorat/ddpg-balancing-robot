@@ -110,9 +110,9 @@ public:
         Serial.printf("Layer %s dimensions decoded: %dx%d (at position %d)\n", 
                     layerName, rows, cols, currentPosition);
 
-        // Sanity check dimensions - expecting 10x12 for new state structure
-        if (rows != 10 || cols != 12) {
-            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 10x12\n", layerName, rows, cols);
+        // Sanity check dimensions - expecting 12x12
+        if (rows != 12 || cols != 12) {
+            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 12x12\n", layerName, rows, cols);
             file.close();
             return false;
         }
@@ -266,9 +266,9 @@ public:
         Serial.printf("Layer %s dimensions decoded: %dx%d (at position %d)\n", 
                     layerName, rows, cols, currentPosition);
 
-        // Sanity check dimensions - second layer is now 10x10
-        if (rows != 10 || cols != 10) {
-            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 10x10\n", layerName, rows, cols);
+        // Sanity check dimensions - second layer is 12x12
+        if (rows != 12 || cols != 12) {
+            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 12x12\n", layerName, rows, cols);
             file.close();
             return false;
         }
@@ -421,9 +421,9 @@ public:
         Serial.printf("Layer %s dimensions decoded: %dx%d (at position %d)\n", 
                     layerName, rows, cols, currentPosition);
 
-        // Sanity check dimensions - Output layer is 1x10
-        if (rows != 1 || cols != 10) {
-            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 1x10\n", layerName, rows, cols);
+        // Sanity check dimensions - Output layer is 1x12
+        if (rows != 1 || cols != 12) {
+            Serial.printf("ERROR: Invalid dimensions for layer %s: %dx%d. Expected 1x12\n", layerName, rows, cols);
             file.close();
             return false;
         }
