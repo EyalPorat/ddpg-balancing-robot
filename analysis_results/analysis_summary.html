@@ -2,7 +2,7 @@
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Balancing Robot Model Analysis</title>
+            <title>Enhanced State Balancing Robot Model Analysis</title>
             <style>
                 body {
                     font-family: Arial, sans-serif;
@@ -39,22 +39,27 @@
                     border-bottom: 1px solid #eee;
                     padding-bottom: 20px;
                 }
+                .enhanced-state-info {
+                    background-color: #f0f7ff;
+                    padding: 15px;
+                    border-radius: 5px;
+                    margin-bottom: 20px;
+                }
             </style>
         </head>
         <body>
-            <h1>Balancing Robot Model Analysis</h1>
-            <p>Analysis of the trained DDPG controller for the balancing robot.</p>
-            <p>Note: All controller actions are normalized to [-1, 1] range. In the actual robot, 
-            these values are scaled to appropriate PWM values or torques.</p>
+            <h1>Enhanced State Balancing Robot Model Analysis</h1>
+            <div class="enhanced-state-info">
+                <p>Analysis of the trained DDPG controller using enhanced state representation. Enhanced state includes:</p>
+                <ul>
+                    <li>Basic state: theta, theta_dot</li>
+                    <li>Action history: Last {0} motor commands</li>
+                    <li>Theta history: Last {1} theta values</li>
+                    <li>Theta_dot history: Last {2} theta_dot values</li>
+                </ul>
+                <p>All actions are normalized to [-1, 1] range, with motor delay compensation built into the control policy.</p>
+            </div>
         
-                <div class="section">
-                    <h2>Controller Response Curves</h2>
-                
-                    <div class="image-container">
-                        <img src="prev_cmd_response.png" alt="Prev Cmd Response">
-                        <div class="caption">Prev Cmd Response</div>
-                    </div>
-                    </div>
                 <div class="section">
                     <h2>Action Analysis</h2>
                 
@@ -64,28 +69,8 @@
                     </div>
                     
                     <div class="image-container">
-                        <img src="action_heatmap_prev_cmd_-0.5.png" alt="Action Heatmap Prev Cmd -0.5">
-                        <div class="caption">Action Heatmap Prev Cmd -0.5</div>
-                    </div>
-                    
-                    <div class="image-container">
-                        <img src="action_heatmap_prev_cmd_-1.0.png" alt="Action Heatmap Prev Cmd -1.0">
-                        <div class="caption">Action Heatmap Prev Cmd -1.0</div>
-                    </div>
-                    
-                    <div class="image-container">
-                        <img src="action_heatmap_prev_cmd_0.0.png" alt="Action Heatmap Prev Cmd 0.0">
-                        <div class="caption">Action Heatmap Prev Cmd 0.0</div>
-                    </div>
-                    
-                    <div class="image-container">
-                        <img src="action_heatmap_prev_cmd_0.5.png" alt="Action Heatmap Prev Cmd 0.5">
-                        <div class="caption">Action Heatmap Prev Cmd 0.5</div>
-                    </div>
-                    
-                    <div class="image-container">
-                        <img src="action_heatmap_prev_cmd_1.0.png" alt="Action Heatmap Prev Cmd 1.0">
-                        <div class="caption">Action Heatmap Prev Cmd 1.0</div>
+                        <img src="action_heatmaps_multiple_action_histories.png" alt="Action Heatmaps Multiple Action Histories">
+                        <div class="caption">Action Heatmaps Multiple Action Histories</div>
                     </div>
                     
                     <div class="image-container">
@@ -120,11 +105,11 @@
                     </div>
                     </div>
                 <div class="section">
-                    <h2>Comparison with PD Controller</h2>
+                    <h2>Trajectory Analysis</h2>
                 
                     <div class="image-container">
-                        <img src="ddpg_vs_pd.png" alt="Ddpg Vs Pd">
-                        <div class="caption">Ddpg Vs Pd</div>
+                        <img src="combined_trajectory_types.png" alt="Combined Trajectory Types">
+                        <div class="caption">Combined Trajectory Types</div>
                     </div>
                     </div>
         </body>

@@ -648,11 +648,6 @@ class ModelAnalyzer:
             (np.pi / 6, -2.0, "Medium +angle -velocity"),
             (-np.pi / 12, 1.0, "Small -angle +velocity"),
             (-np.pi / 6, 2.0, "Medium -angle +velocity"),
-            # Extreme edge cases
-            (np.pi / 3, 3.0, "Extreme +angle +velocity"),
-            (-np.pi / 3, -3.0, "Extreme -angle -velocity"),
-            (np.pi / 3, -3.0, "Extreme +angle -velocity"),
-            (-np.pi / 3, 3.0, "Extreme -angle +velocity"),
             # Near balanced states
             (np.pi / 36, 0.1, "Near balanced +angle"),
             (-np.pi / 36, -0.1, "Near balanced -angle"),
