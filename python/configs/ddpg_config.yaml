@@ -12,7 +12,7 @@ model:
 
 # Training parameters
 training:
-  total_episodes: 2500
+  total_episodes: 1700
   max_steps_per_episode: 150
   batch_size: 512
   gamma: 0.99  # Discount factor
