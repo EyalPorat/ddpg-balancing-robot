@@ -2,36 +2,15 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
-// struct __attribute__((packed)) LogMessage {
-//     float acc_x_g;
-//     float acc_z_g;
-//     float gyro_x_degps;
-//     float ori_x_deg;
-//     float dist;
-//     float spd;
-//     float dt_ms;
-//     float mech_factor;
-//     int8_t output_pwm;
-//     // bool output_strong_fwd;
-//     // bool output_weak_fwd;
-//     // bool output_none;
-//     // bool output_weak_bwd;
-//     // bool output_strong_bwd;
-//     bool standing;
-// };
-
 struct __attribute__((packed)) LogMessage {
     // Timing
     uint32_t timestamp;      // milliseconds since boot
     float dt;               // control loop period in seconds
     
     // Controller State
-    float theta;           // body angle (rad)
+    float theta;           // body angle (rad) - relative to initial position
     float theta_dot;       // angular velocity (rad/s)
-    float x;              // horizontal position (m)
-    float x_dot;          // horizontal velocity (m/s)
-    float phi;            // wheel angle (rad)
-    float phi_dot;        // wheel angular velocity (rad/s)
+    float theta_global;    // absolute body angle (rad) - non-relative
     
     // Control Outputs
     float model_output;    // raw model output

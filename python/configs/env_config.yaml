@@ -1,0 +1,66 @@
+# Environment Configuration
+
+# Physics parameters
+physics:
+  gravity: 9.81  # m/s²
+  
+  # Robot parameters
+  body_mass: 0.06      # kg
+  wheel_mass: 0.04     # kg
+  body_length: 0.025   # m
+  wheel_radius: 0.033  # m
+  body_inertia: 0.001  # kg⋅m²
+  wheel_inertia: 2.0e-5  # kg⋅m²
+  
+  # Motor parameters
+  max_torque: 0.23       # N⋅m (used only in physics simulation to scale normalized actions)
+  max_delta: 0.25        # Max change in normalized action (as fraction of [-1, 1] range)
+  motor_deadzone: 0.04   # N⋅m
+  static_friction: 0.7   # coefficient
+  
+  # Motor delay parameters
+  motor_delay_steps: 2   # ~80ms at 25Hz
+  motor_tau_rise: 0.05   # Rise time constant (50ms, adjusted for 25Hz)
+  motor_tau_fall: 0.08   # Fall time constant (80ms, adjusted for 25Hz)
+  
+  # Simulation parameters - UPDATED FOR 25Hz
+  timestep: 0.04         # seconds (changed from 0.01 for 25Hz)
+  integration_method: "semi-implicit-euler"
+
+# State space
+observation:
+  angle_limit: 1.57079632679  # pi/2 radians (90 degrees)
+  angular_velocity_limit: 8.0  # rad/s
+  
+  # Enhanced state parameters
+  theta_history_size: 3       # Number of previous theta values to store
+  theta_dot_history_size: 3   # Number of previous theta_dot values to store
+  action_history_size: 4      # Number of previous action values to store
+
+  noise_std: 0.015  # observation noise
+
+# Reward parameters
+reward:
+  angle_weight: 2.0
+  
+  "angle": 5.0
+  "direction": 7.5
+  "stillness": 40.0
+  "angular_velocity": 1.0
+  "angle_decay": 30.0
+  "reached_stable_bonus": 0.0
+  "far_from_center_penalty": 0.0
+  "angular_vel_far_from_center_penalty": 6.0
+  "max_angle_for_angular_vel_far_from_center_penalty": 20.0  # degrees
+
+# Episode termination
+termination:
+  max_angle: 1.0472  # 60 degrees in radians
+  max_steps: 50
+
+# Rendering
+render:
+  mode: "human"  # or "rgb_array"
+  width: 800
+  height: 600
+  fps: 25

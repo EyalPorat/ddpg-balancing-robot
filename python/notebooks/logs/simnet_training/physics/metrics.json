@@ -1,0 +1,18 @@
+[
+  {
+    "train_loss": 0.6402292653986935,
+    "physics_loss": 0.7022201195015886,
+    "action_history_loss": 0.7675610109133655,
+    "theta_history_loss": 0.34947989506792915,
+    "theta_dot_history_loss": 0.719875725046281,
+    "extreme_samples_percent": 0,
+    "val_loss": 0.11692165210843086,
+    "val_physics_loss": 0.11334345041325798,
+    "val_action_history_loss": 0.4178509949534028,
+    "val_theta_history_loss": 0.028632242370534827,
+    "val_theta_dot_history_loss": 0.19848171290424135,
+    "epoch": 0,
+    "lr": 8e-05,
+    "timestamp": "2025-05-20T13:49:40.846579"
+  }
+]

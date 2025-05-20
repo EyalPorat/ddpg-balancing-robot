@@ -1,55 +1,98 @@
-# Balancing Robot with DDPG Reinforcement Learning
+# Balancing Robot Project
 
-A self-balancing robotics project utilizing Deep Deterministic Policy Gradient (DDPG) reinforcement learning. The robot learns to maintain balance through physics simulation training and deploys the trained model on real hardware, fine tuning to improve performance.
+A complete self-balancing robot implementation combining reinforcement learning, physics simulation, and real-world deployment. This project includes both the embedded control system and the Python training framework.
 
-## Technologies
+## Project Overview
 
-- Python + PyTorch for DDPG implementation and training
-- Gymnasium for simulation environment creation
-- ESP32 (M5StickC Plus) for robot hardware
-- Two-way UDP socket for model deployment and data logging
+This project implements a two-wheeled self-balancing robot using:
+- Deep Deterministic Policy Gradient (DDPG) for control
+- Neural network-based dynamics simulation (SimNet)
+- ESP32 (M5StickC Plus) for real-time control
+- Web-based monitoring and configuration interface
 
-## Project Components
+## Repository Structure
 
-- Reinforcement learning training in simulation
-- Real-time model deployment via UDP
-- Telemetry logging and visualization
-- Real-world performance analysis
+```
+balancing_robot/
+├── docs/                      # Project documentation
+├── embedded/                  # ESP32 firmware
+│   ├── include/              # C++ headers
+│   │   ├── ddpg_controller.h # DDPG inference
+│   │   ├── ddpg_network.h    # Neural network implementation
+│   │   └── model_receiver.h  # Model loading via UDP
+│   └── src/                  # Implementation files
+├── python/                   # Python training framework
+│   └── README.md            # Python package documentation
+└── tools/                   # Utility scripts
+```
 
-## Quick Start Guide
+## Getting Started
 
-### Training
+### Hardware Requirements
 
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+1. M5StickC Plus (ESP32-based controller)
+2. Custom robot chassis
+   - 2x DC motors with encoders
+   - Motor driver
+   - Battery pack
+   - Wheels and frame
 
-2. Open `balancing_robot_ddpg/balancing_robot_ddpg.ipynb` and run all cells up to model deployment and fine-tuning
-3. Model checkpoints saved to `checkpoints/` directory
+### Software Requirements
 
-### Deploying to Robot
+1. PlatformIO IDE for embedded development
+2. Python 3.8+ for training framework
+3. Modern web browser for monitoring interface
 
-1. Flash firmware to M5StickC-Plus (ESP32) using PlatformIO
-2. Connect to robot's WiFi network
-3. Run notebook's model deployment cell to send weights via UDP
-4. Robot automatically loads weights and switches to DDPG mode
+### Initial Setup
 
-### Fine Tuning
+1. Set up the embedded system:
+```bash
+cd embedded
+pio init
+pio lib install
+```
 
-1. Run log processor:
-   ```bash
-   python tools/log_processor.py
-   ```
-2. Play several training "episodes" (from starting to an end contition)
-3. Run the fine-tuning cells in notebook
-4. Run model deployment cells in notebook
-5. Repeat until reaching ideal results
+2. Set up the Python environment:
+```bash
+cd python
+python -m venv venv
+source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+pip install -r requirements.txt
+pip install -e .
+```
 
-## Notes
+## Development Workflow
 
-- Robot requires stable WiFi connection for weight transfer
-- Battery voltage affects motor response - monitor in telemetry
-- Initial balancing requires flat surface
-- Fine-tuning improves real-world performance
-- For video generation in notebook, ffmpeg needs to be installed
+1. Train the model:
+   - Use Jupyter notebooks in `python/notebooks/` (`train_ddpg.ipynb` and `train_simnet.ipynb`)
+   - Models are saved to `python/notebooks/logs/`
+
+2. Deploy to robot:
+   - Configure network settings in `embedded/include/config.h`
+   - Flash firmware to ESP32
+   - Use `tools/model_deployer.py` to send trained model
+
+3. Monitor performance:
+   - Connect to robot's WiFi access point
+   - Open web interface
+   - View real-time telemetry
+
+## Modules
+
+### Embedded System
+- Real-time control loop
+- DDPG model inference
+- Sensor fusion and state estimation
+- WiFi connectivity and web server
+- UDP-based model loading and telemetry
+
+### Python Framework
+- DDPG implementation
+- SimNet for dynamics simulation
+- Training environments and utilities
+- Visualization and analysis tools
+- Model deployment utilities
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details

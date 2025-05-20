@@ -1,0 +1,46 @@
+# DDPG Training Configuration
+
+# Model parameters
+model:
+  actor:
+    hidden_dims: [12, 12]
+    learning_rate: 0.0001
+    
+  critic:
+    hidden_dims: [256, 128, 64]
+    learning_rate: 0.0001
+
+# Training parameters
+training:
+  total_episodes: 1700
+  max_steps_per_episode: 150
+  batch_size: 512
+  gamma: 0.99  # Discount factor
+  tau: 0.005   # Target network update rate
+  
+  # Experience replay settings
+  buffer_size: 1000
+  min_buffer_size: 500  # Minimum samples before training starts
+  
+  # Exploration settings
+  action_noise: 0.1
+  noise_decay: 0.9999
+  min_noise: 0.01
+
+  # Evaluation settings
+  eval_frequency: 10
+  eval_episodes: 5
+  save_frequency: 100
+
+  # Curriculum learning settings
+  use_curriculum: true
+  curriculum_epochs: 750
+  curriculum_initial_angle_range_precent: 0.1
+  curriculum_initial_angular_velocity_range_precent: 0.1
+
+# Logging parameters
+logging:
+  log_frequency: 1
+  video_frequency: 100
+  checkpoint_frequency: 100
+  tensorboard: true

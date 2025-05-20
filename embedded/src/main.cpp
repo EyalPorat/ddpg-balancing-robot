@@ -6,6 +6,7 @@
 #include <UdpLogger.h>
 #include <ddpg_controller.h>
 #include <webserver.h>
+#include <queue>
 
 // Pin definitions
 #define LED 10
@@ -25,13 +26,16 @@
 #define ANGLE_Y 180
 
 // Timing constants
-#define DISPLAY_UPDATE_PERIOD 100  // 10Hz in ms
-#define LOGGING_PERIOD 25         // 40Hz in ms
+#define DISPLAY_UPDATE_PERIOD 100 // 10Hz in ms
+#define LOGGING_PERIOD 40         // 25Hz in ms
 
 // Network configuration
 const char* WIFI_SSID = "SSID";
 const char* WIFI_PASSWORD = "PASSWORD";
 const uint16_t UDP_PORT = 44444;
+
+const int MOTOR_DELAY_STEPS = 2;
+std::queue<float> motor_command_buffer;
 
 // Forward declarations
 void estimateAngle();
@@ -57,6 +61,7 @@ void periodicDisplayUpdate();
 void periodicLoggingUpdate();
 void drive();
 void checkButtonPress();
+void initMotorCommandBuffer();
 
 // System state
 byte demoMode = 0;
@@ -79,7 +84,6 @@ float lastComplementaryAngle = 0.0;
 float varAngDDPG = 0.0;
 float varAngPID = 0.0;
 float lastComplementaryAngleDDPG = 0.0;
-float lastComplementaryAnglePID = 0.0;
 
 // IMU variables
 float gyroXoffset = 0.0, gyroYoffset = 0.0, accXoffset = 0.0;
@@ -89,17 +93,17 @@ float aveAccX = 0.0, aveAccZ = 0.0, aveAbsOmg = 0.0;
 
 // System configuration
 float cutoff = 0.1;
-const float clk = 0.01;
+const float clk = 0.04;
 const uint32_t interval = (uint32_t)(clk * 1000);
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastLoggingUpdate = 0;
 
 // Control parameters
-float Kang = 37.0;
+float Kang = 18.0;
 float Komg = 0.84;
-float KIang = 800.0;
-float Kdst = 85.0;
-float Kspd = 2.7;
+float KIang = 600.0;
+float Kdst = 65.0;
+float Kspd = 1.3;
 int16_t maxPwr;
 int16_t fbBalance = 0;
 int16_t motorDeadband = 0;
@@ -113,18 +117,6 @@ int16_t punchPwr = 20;
 int16_t punchDur = 1;
 int16_t punchPwr2;
 int16_t punchCountL = 0, punchCountR = 0;
-
-// Physical parameters
-float wheel_radius = 0.033;  // meters
-float wheel_angle = 0.0;     // radians
-float wheel_velocity = 0.0;  // rad/s
-uint32_t last_wheel_update = 0;
-
-// DDPG state variables
-float ddpg_speed = 0.0;
-float ddpg_distance = 0.0;
-float prev_ddpg_distance = 0.0;
-uint32_t last_ddpg_update = 0;
 
 // Global objects
 UdpLogger logger;
@@ -170,12 +162,12 @@ void estimateAngle() {
     }
     
     lastComplementaryAngleDDPG = (1.0 - cutoff) * (lastComplementaryAngleDDPG + gyroRate * clk) + 
-                                 cutoff * accelAngleDDPG;
+                             cutoff * accelAngleDDPG;
     
     varAngDDPG = lastComplementaryAngleDDPG - initialAngle;
     
     // PID angle calculation
-    varOmg = (gyroYdata - gyroYoffset);
+    varOmg = gyroRate;
     float calibratedAccelerationX = (accXdata - accXoffset);
     varAngPID += (varOmg + (calibratedAccelerationX * 57.3 - varAngPID) * cutoff) * clk;
     
@@ -193,12 +185,12 @@ void driveMotor(byte ch, int8_t sp) {
 
 void driveMotorL(int16_t pwm) {
     outputL = (int8_t)constrain(pwm, -127, 127);
-    driveMotor(0, outputL);
+    driveMotor(0, -outputL);
 }
 
 void driveMotorR(int16_t pwm) {
     outputR = (int8_t)constrain(-pwm, -127, 127);
-    driveMotor(1, outputR);
+    driveMotor(1, -outputR);
 }
 
 void motorPowerWithPunch(int16_t power, int16_t& dir, int16_t& count, void (*driveFunc)(int16_t)) {
@@ -223,56 +215,56 @@ void motorPowerWithPunch(int16_t power, int16_t& dir, int16_t& count, void (*dri
     }
 }
 
-void updateDDPGStates() {
-    uint32_t current_time = millis();
-    float dt = (current_time - last_wheel_update) / 1000.0f;
-    
-    if (dt > 0) {
-        float avg_motor_command = outputL;
-        const float MAX_WHEEL_SPEED = 434.0f;  // degrees per second
-        wheel_velocity = (avg_motor_command / 127.0f) * (MAX_WHEEL_SPEED * DEG_TO_RAD);
-        wheel_angle += wheel_velocity * dt;
-        ddpg_speed = wheel_velocity * wheel_radius;
-        ddpg_distance += ddpg_speed * dt;
-        prev_ddpg_distance = ddpg_distance;
-        last_wheel_update = current_time;
-    }
-}
-
 void drive() {
     if (!standing) return;
 
     if (demoMode == MODE_DDPG && ddpgController.isInitialized()) {
-        updateDDPGStates();
-
-        float theta_rad = varAng * DEG_TO_RAD;
-        float theta_dot_rad = varOmg * DEG_TO_RAD;
-        
+        // Get action from DDPG controller
         float action = ddpgController.getAction(
-            theta_rad,
-            theta_dot_rad,
-            ddpg_distance,
-            ddpg_speed,
-            wheel_angle,
-            wheel_velocity
+            lastComplementaryAngleDDPG * DEG_TO_RAD,  // Convert to radians
+            varOmg * DEG_TO_RAD                       // Convert to radians
         );
+
+        // Store action in history buffer (only for tracking)
+        motor_command_buffer.push(action);
+        if (motor_command_buffer.size() > MOTOR_DELAY_STEPS) {
+            motor_command_buffer.pop(); // Keep buffer size consistent
+        }
         
-        action = constrain(action, -maxPwr, maxPwr);
+        // float action = 0.0f;
+        // action = constrain(action, -maxPwr, maxPwr);
+
+        // // Create a random action for data collection
+        // // float random_factor = random(600, 300) / 1000.0f;
+        // float random_factor = 0.7f;
+        // // action = random_factor * varAngDDPG * (0.6f * maxPwr) - (1.0f * maxPwr);
+        // action = random_factor * maxPwr * (varAngDDPG / abs(varAngDDPG));
+        // action = constrain(action, -maxPwr, maxPwr);
+
         driveMotorL(action);
         driveMotorR(action);
-
+        
+        // For logging and display
+        powerL = powerR = action;
     } else {
-        varSpd += power * clk;
-        varDst += Kdst * (varSpd * clk - moveTarget);
-        varIang += KIang * varAng * clk;
+        float lowerFactor = 1.0f/4.0f;
+        varSpd += power * clk * lowerFactor;
+        varDst += Kdst * (varSpd * clk * lowerFactor - moveTarget);
+        varIang += KIang * varAng * clk * lowerFactor;
         
         power = varIang + varDst + (Kspd * varSpd) + (Kang * varAng) + (Komg * varOmg);
 
         powerR = power;
         powerL = power;
 
-        ipowerL = (int16_t)constrain(powerL, -maxPwr, maxPwr);
-        ipowerR = (int16_t)constrain(powerR, -maxPwr, maxPwr);
+        // Store in history buffer (for consistency, not used for control)
+        motor_command_buffer.push(power);
+        if (motor_command_buffer.size() > MOTOR_DELAY_STEPS) {
+            motor_command_buffer.pop();
+        }
+
+        ipowerL = (int16_t)constrain(power, -maxPwr, maxPwr);
+        ipowerR = (int16_t)constrain(power, -maxPwr, maxPwr);
         
         motorPowerWithPunch(ipowerL, motorLdir, punchCountL, driveMotorL);
         motorPowerWithPunch(ipowerR, motorRdir, punchCountR, driveMotorR);
@@ -291,20 +283,15 @@ void resetPara() {
     punchDur = 1;
     fbBalance = -3;
     motorDeadband = 10;
-    maxPwr = 120;
+    maxPwr = 127;
     punchPwr2 = max(punchPwr, motorDeadband);
 }
 
 void resetVar() {
     power = moveTarget = 0.0;
-    varAngDDPG = varAngPID = varOmg = varDst = varSpd = varIang = 0.0;
-    lastComplementaryAngleDDPG = lastComplementaryAnglePID = initialAngle;
-    
-    ddpg_speed = ddpg_distance = prev_ddpg_distance = 0.0;
-    last_ddpg_update = millis();
-
-    wheel_angle = wheel_velocity = 0.0;
-    last_wheel_update = millis();
+    varAng = varOmg = varDst = varSpd = varIang = 0.0;
+    varAngDDPG = varAngPID = 0.0;
+    lastComplementaryAngle = lastComplementaryAngleDDPG = initialAngle;
 }
 
 void resetMotor() {
@@ -313,6 +300,10 @@ void resetMotor() {
     counterOverPwr = 0;
     punchCountL = punchCountR = 0;
     motorLdir = motorRdir = 0;
+    
+    initMotorCommandBuffer();
+
+    ddpgController.resetHistories();
 }
 
 void gyroCalibration() {
@@ -352,7 +343,10 @@ void accelInitialAngCalibration() {
     }
     
     initialAngle = (-atan2(sumAccX / N_CAL2, sumAccZ / N_CAL2) * RAD_TO_DEG) + 180.0;
-    lastComplementaryAngle = initialAngle;
+    if (initialAngle > 180.0) {
+        initialAngle -= 360.0;
+    }
+    lastComplementaryAngle = lastComplementaryAngleDDPG = initialAngle;
     
     M5.Lcd.fillScreen(BLACK);
     digitalWrite(LED, HIGH);
@@ -418,12 +412,16 @@ void setup() {
         delay(1000);
         
         Serial.println("Initializing DDPG controller...");
-        if (!ddpgController.init(maxPwr)) {
+        // max_delta is the maximum change allowed per step in the normalized action space [-1, 1]
+        // 0.25 means 25% of the full range can change in a single step
+        float max_delta = 0.25f;
+        if (!ddpgController.init(maxPwr, max_delta)) {
             Serial.println("DDPG initialization failed");
             M5.Lcd.setCursor(0, 110);
             M5.Lcd.print("DDPG Init Failed");
         } else {
             Serial.println("DDPG initialized successfully");
+            Serial.printf("Max PWM: %d, Max delta: %.2f\n", maxPwr, max_delta);
         }
         
         if (!logger.begin(WIFI_SSID, WIFI_PASSWORD, UDP_PORT)) {
@@ -438,6 +436,9 @@ void setup() {
     }
     
     gyroCalibration();
+
+    // Initialize motor delay buffer
+    initMotorCommandBuffer();
 
     Serial.printf("Free heap: %d\n", ESP.getFreeHeap());    
     Serial.println("Setup complete");
@@ -456,6 +457,8 @@ void loop() {
         resetVar();
         standing = false;
         powerL = powerR = 0;
+        delay(1000); // Delay to prevent immediate re-calibration
+        estimateAngle();
     }
     
     if (!standing) {
@@ -469,16 +472,17 @@ void loop() {
     } else {
         drive();
     }
+    periodicLoggingUpdate();
     
     if (currentTime - lastDisplayUpdate >= DISPLAY_UPDATE_PERIOD) {
         periodicDisplayUpdate();
         lastDisplayUpdate = currentTime;
     }
     
-    if (currentTime - lastLoggingUpdate >= LOGGING_PERIOD) {
-        periodicLoggingUpdate();
-        lastLoggingUpdate = currentTime;
-    }
+    // if (currentTime - lastLoggingUpdate >= LOGGING_PERIOD) {
+    //     periodicLoggingUpdate();
+    //     lastLoggingUpdate = currentTime;
+    // }
 
     do time1 = millis();
     while (time1 - time0 < interval);
@@ -566,12 +570,9 @@ void buildLogMessage(LogMessage &logMessage) {
     logMessage.timestamp = millis();
     logMessage.dt = clk;
     
-    logMessage.theta = varAng * DEG_TO_RAD;
+    logMessage.theta = varAngDDPG * DEG_TO_RAD;
     logMessage.theta_dot = varOmg * DEG_TO_RAD;
-    logMessage.x = ddpg_distance;
-    logMessage.x_dot = ddpg_speed;
-    logMessage.phi = wheel_angle;
-    logMessage.phi_dot = wheel_velocity;
+    logMessage.theta_global = lastComplementaryAngleDDPG * DEG_TO_RAD;
     
     logMessage.model_output = power;
     logMessage.motor_pwm = outputL;
@@ -624,4 +625,16 @@ void printHeapInfo() {
     Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
     Serial.printf("Minimum free heap: %d bytes\n", ESP.getMinFreeHeap());
     Serial.printf("Maximum alloc heap: %d bytes\n", ESP.getMaxAllocHeap());
+}
+
+void initMotorCommandBuffer() {
+    // Clear the buffer
+    while (!motor_command_buffer.empty()) {
+        motor_command_buffer.pop();
+    }
+    
+    // Fill with zeros
+    for (int i = 0; i < MOTOR_DELAY_STEPS; i++) {
+        motor_command_buffer.push(0.0f);
+    }
 }

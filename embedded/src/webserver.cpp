@@ -58,6 +58,7 @@ String TelemetryWebServer::getTelemetryJSON() {
     // Basic telemetry with error checking
     json += "\"angle\":" + String(varAng, 2) + ",";  // Limit decimal places
     json += "\"angular_velocity\":" + String(varOmg, 2) + ",";
+    json += "\"global_angle\":" + String(lastComplementaryAngleDDPG, 2) + ",";
     json += "\"battery_voltage\":" + String(vBatt, 2) + ",";
     json += "\"mode\":\"" + String(demoMode == MODE_PID ? "pid" : "ddpg") + "\"";
     

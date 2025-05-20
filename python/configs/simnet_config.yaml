@@ -1,0 +1,68 @@
+# SimNet Training Configuration
+
+# Model architecture
+model:
+  hidden_dims: [32, 32, 32]
+  dropout_rate: 0.25
+  activation: "relu"
+  layer_norm: true
+
+# Training data collection
+data_collection:
+  physics_samples: 10000000
+  real_samples: 10000
+  noise_std: 0.1              # Action noise
+  observation_noise_std: 0.01  # observation noise
+  validation_split: 0.2
+  random_seed: 42
+
+# Training parameters
+training:
+  # Physics-based pretraining
+  pretrain:
+    learning_rate: 0.00008
+    epochs: 1
+    batch_size: 512
+    early_stopping_patience: 20
+    reduce_lr_patience: 4
+    reduce_lr_factor: 0.5
+    min_lr: 0.0000001
+
+  # Real-data fine-tuning
+  finetune:
+    learning_rate: 0.001
+    epochs: 50
+    batch_size: 128
+    early_stopping_patience: 5
+    reduce_lr_patience: 3
+    reduce_lr_factor: 0.5
+    min_lr: 0.0000001
+
+  # Class balancing settings
+  class_balancing:
+    enabled: false
+    num_bins: 15
+    strategy: "kmeans"     # Options: 'uniform', 'quantile', 'kmeans'
+    sample_weights: false     # Use weighted sampling during training
+    oversample: true        # Alternative to weighted sampling
+
+    thresholds:
+      angle_deg: 20
+      angular_velocity_dps: 90
+
+      max_abs_action: 0.9
+      motor_angle_deg: 20
+
+# Hybrid simulation settings
+hybrid:
+  initial_ratio: 0.0
+  target_ratio: 1.0
+  adaptation_steps: 1000
+  adaptation_schedule: "linear"  # or "exponential"
+
+# Logging
+logging:
+  log_frequency: 1
+  validation_frequency: 5
+  save_best: true
+  save_frequency: 10

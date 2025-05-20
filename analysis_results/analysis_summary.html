@@ -1,0 +1,117 @@
+
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Enhanced State Balancing Robot Model Analysis</title>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    padding: 20px;
+                }
+                h1 {
+                    color: #333;
+                    text-align: center;
+                }
+                h2 {
+                    color: #555;
+                    margin-top: 30px;
+                }
+                .image-container {
+                    margin: 20px 0;
+                    text-align: center;
+                }
+                img {
+                    max-width: 100%;
+                    height: auto;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    padding: 5px;
+                    margin-bottom: 10px;
+                }
+                .caption {
+                    font-style: italic;
+                    color: #666;
+                }
+                .section {
+                    margin-bottom: 40px;
+                    border-bottom: 1px solid #eee;
+                    padding-bottom: 20px;
+                }
+                .enhanced-state-info {
+                    background-color: #f0f7ff;
+                    padding: 15px;
+                    border-radius: 5px;
+                    margin-bottom: 20px;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>Enhanced State Balancing Robot Model Analysis</h1>
+            <div class="enhanced-state-info">
+                <p>Analysis of the trained DDPG controller using enhanced state representation. Enhanced state includes:</p>
+                <ul>
+                    <li>Basic state: theta, theta_dot</li>
+                    <li>Action history: Last {0} motor commands</li>
+                    <li>Theta history: Last {1} theta values</li>
+                    <li>Theta_dot history: Last {2} theta_dot values</li>
+                </ul>
+                <p>All actions are normalized to [-1, 1] range, with motor delay compensation built into the control policy.</p>
+            </div>
+        
+                <div class="section">
+                    <h2>Action Analysis</h2>
+                
+                    <div class="image-container">
+                        <img src="action_heatmap.png" alt="Action Heatmap">
+                        <div class="caption">Action Heatmap</div>
+                    </div>
+                    
+                    <div class="image-container">
+                        <img src="action_heatmaps_multiple_action_histories.png" alt="Action Heatmaps Multiple Action Histories">
+                        <div class="caption">Action Heatmaps Multiple Action Histories</div>
+                    </div>
+                    
+                    <div class="image-container">
+                        <img src="action_surface_3d.png" alt="Action Surface 3D">
+                        <div class="caption">Action Surface 3D</div>
+                    </div>
+                    
+                    <div class="image-container">
+                        <img src="action_trajectories.png" alt="Action Trajectories">
+                        <div class="caption">Action Trajectories</div>
+                    </div>
+                    </div>
+                <div class="section">
+                    <h2>Phase Space Analysis</h2>
+                
+                    <div class="image-container">
+                        <img src="phase_portrait.png" alt="Phase Portrait">
+                        <div class="caption">Phase Portrait</div>
+                    </div>
+                    
+                    <div class="image-container">
+                        <img src="phase_space.png" alt="Phase Space">
+                        <div class="caption">Phase Space</div>
+                    </div>
+                    </div>
+                <div class="section">
+                    <h2>Stability Analysis</h2>
+                
+                    <div class="image-container">
+                        <img src="stability_regions.png" alt="Stability Regions">
+                        <div class="caption">Stability Regions</div>
+                    </div>
+                    </div>
+                <div class="section">
+                    <h2>Trajectory Analysis</h2>
+                
+                    <div class="image-container">
+                        <img src="combined_trajectory_types.png" alt="Combined Trajectory Types">
+                        <div class="caption">Combined Trajectory Types</div>
+                    </div>
+                    </div>
+        </body>
+        </html>
+        
